@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }} - 管理控制台</title>
+    <link rel="stylesheet" href="/console/static/console.css?v=20260521-win7-baseline">
+  </head>
+  <body>
+    <div class="product-shell">
+      <aside class="product-sidebar" aria-label="主导航">
+        <div class="sidebar-brand">
+          <div class="brand-mark" aria-hidden="true">控</div>
+          <div>
+            <div class="brand-name">管理控制台</div>
+            <div class="brand-subtitle">任务运行管理</div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          {% for item in nav_items %}
+            <a
+              class="nav-item{% if item.key == active_nav %} is-active{% endif %}"
+              href="{{ item.href }}"
+              {% if item.key == active_nav %}aria-current="page"{% endif %}
+            >
+              <span class="nav-dot" aria-hidden="true"></span>
+              <span>
+                <span class="nav-label">{{ item.label }}</span>
+                <span class="nav-description">{{ item.description }}</span>
+              </span>
+            </a>
+          {% endfor %}
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>内网只读管理台</span>
+        </div>
+      </aside>
+
+      <div class="product-main">
+        <header class="product-topbar">
+          <div>
+            <h1>{{ page_title }}</h1>
+            <p>{{ page_description }}</p>
+          </div>
+          <div class="topbar-actions" aria-label="页面操作">
+            <button class="plain-button" type="button">帮助</button>
+            <a class="user-button" href="/console/logout" title="退出登录">{{ console_user_name }}</a>
+          </div>
+        </header>
+
+        <main class="content-area">
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+    <script src="/console/static/console.js?v=20260521-win7-baseline" defer></script>
+  </body>
+</html>

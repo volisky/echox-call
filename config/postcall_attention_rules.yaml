@@ -1,0 +1,820 @@
+version: postcall_attention_rules_v6
+mergeGapSec: 5.0
+nearWindowSec: 15.0
+
+confidence:
+  highScoreGte: 0.75
+  mediumScoreGte: 0.50
+
+insightTypes:
+  suspected_screaming:
+    insightName: 疑似尖叫线索
+    sourceField: audioEventScores
+    labels:
+      - Screaming
+    scoreGte: 0.60
+
+  suspected_adult_crying:
+    insightName: 疑似成人哭泣线索
+    sourceField: audioEventScores
+    labels:
+      - Crying, sobbing
+      - Whimper
+    scoreGte: 0.50
+
+  suspected_infant_crying:
+    insightName: 疑似婴幼儿哭声线索
+    sourceField: audioEventScores
+    labels:
+      - Baby cry, infant cry
+    scoreGte: 0.45
+
+  suspected_shouting:
+    insightName: 疑似喊叫线索
+    sourceField: audioEventScores
+    labels:
+      - Shout
+      - Yell
+      - Bellow
+    scoreGte: 0.55
+
+  suspected_child_shouting:
+    insightName: 疑似儿童喊叫线索
+    sourceField: audioEventScores
+    labels:
+      - Children shouting
+    scoreGte: 0.50
+
+  suspected_blunt_impact:
+    insightName: 疑似撞击声线索
+    sourceField: audioEventScores
+    labels:
+      - Bang
+      - Thump, thud
+    scoreGte: 0.50
+
+  suspected_door_impact:
+    insightName: 疑似门体冲击线索
+    sourceField: audioEventScores
+    labels:
+      - Slam
+    scoreGte: 0.50
+
+  suspected_knocking:
+    insightName: 疑似敲门或敲击线索
+    sourceField: audioEventScores
+    labels:
+      - Knock
+    scoreGte: 0.55
+
+  suspected_physical_contact:
+    insightName: 疑似拍打或掌击线索
+    sourceField: audioEventScores
+    labels:
+      - Slap, smack
+    scoreGte: 0.50
+
+  suspected_breaking_damage:
+    insightName: 疑似破裂或损坏声线索
+    sourceField: audioEventScores
+    labels:
+      - Smash, crash
+      - Breaking
+      - Glass
+      - Shatter
+    scoreGte: 0.45
+
+  abnormal_breathing:
+    insightName: 疑似异常呼吸线索
+    sourceField: audioEventScores
+    labels:
+      - Wheeze
+      - Gasp
+      - Pant
+    scoreGte: 0.50
+
+  suspected_pain_or_discomfort:
+    insightName: 疑似痛苦或不适声线索
+    sourceField: audioEventScores
+    labels:
+      - Wail, moan
+      - Groan
+      - Grunt
+    scoreGte: 0.50
+
+  critical_audio_event:
+    insightName: 疑似强危险声音事件线索
+    sourceField: audioEventScores
+    labels:
+      - Gunshot, gunfire
+      - Explosion
+    scoreGte: 0.35
+
+  voice_tension:
+    insightName: 语音紧张或高唤醒线索
+    sourceField: voiceEmotionDimensions
+    dimensionKey: arousal
+    scoreGte: 0.68
+
+  voice_fear:
+    insightName: 疑似恐惧语音线索
+    sourceField: voiceEmotionScores
+    labels:
+      - Fear
+    scoreGte: 0.55
+
+  voice_anger:
+    insightName: 疑似愤怒语音线索
+    sourceField: voiceEmotionScores
+    labels:
+      - Anger
+    scoreGte: 0.55
+
+  voice_sadness:
+    insightName: 疑似悲伤语音线索
+    sourceField: voiceEmotionScores
+    labels:
+      - Sadness
+    scoreGte: 0.55
+
+  voice_neutral:
+    insightName: 语音平稳线索
+    sourceField: voiceEmotionScores
+    labels:
+      - Neutral
+    scoreGte: 0.55
+
+  voice_negative_valence:
+    insightName: 语音负向情绪线索
+    sourceField: voiceEmotionDimensions
+    dimensionKey: valence
+    scoreLte: 0.35
+
+  voice_low_dominance:
+    insightName: 语音控制感偏低线索
+    sourceField: voiceEmotionDimensions
+    dimensionKey: dominance
+    scoreLte: 0.35
+
+  voice_low_arousal:
+    insightName: 语音低唤醒线索
+    sourceField: voiceEmotionDimensions
+    dimensionKey: arousal
+    scoreLte: 0.45
+
+compositeInsights:
+  - insightType: screaming_with_impact
+    insightName: 疑似尖叫伴随冲击线索
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    requiredInsightTypes:
+      - suspected_screaming
+    requiredAnyInsightTypes:
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: screaming_with_impact
+    reasonTemplate: "{startSec}s-{endSec}s 出现疑似尖叫并接近出现冲击、拍打或破裂类线索，建议重点复核。"
+
+  - insightType: screaming_with_fear
+    insightName: 疑似尖叫伴随恐惧或异常呼吸线索
+    sourceInsightTypes:
+      - suspected_screaming
+      - voice_fear
+      - voice_tension
+      - abnormal_breathing
+    requiredInsightTypes:
+      - suspected_screaming
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: screaming_with_fear_or_breathing
+    reasonTemplate: "{startSec}s-{endSec}s 疑似尖叫与恐惧、紧张或异常呼吸线索接近出现，建议重点复核。"
+
+  - insightType: infant_crying_with_conflict
+    insightName: 疑似婴幼儿哭声伴随冲突线索
+    sourceInsightTypes:
+      - suspected_infant_crying
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    requiredInsightTypes:
+      - suspected_infant_crying
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: infant_crying_with_conflict
+    reasonTemplate: "{startSec}s-{endSec}s 疑似婴幼儿哭声与喊叫、冲击或破裂类线索接近出现，建议重点复核。"
+
+  - insightType: adult_crying_with_distress
+    insightName: 疑似哭泣伴随痛苦或恐惧线索
+    sourceInsightTypes:
+      - suspected_adult_crying
+      - voice_fear
+      - voice_sadness
+      - voice_tension
+      - abnormal_breathing
+      - suspected_pain_or_discomfort
+    requiredInsightTypes:
+      - suspected_adult_crying
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: crying_with_distress_voice
+    reasonTemplate: "{startSec}s-{endSec}s 疑似哭泣与恐惧、悲伤、异常呼吸或痛苦声线索接近出现，建议重点复核。"
+
+  - insightType: breathing_distress_with_voice
+    insightName: 疑似异常呼吸伴随语音异常线索
+    sourceInsightTypes:
+      - abnormal_breathing
+      - voice_fear
+      - voice_tension
+      - voice_sadness
+      - suspected_adult_crying
+      - suspected_infant_crying
+      - suspected_pain_or_discomfort
+    requiredInsightTypes:
+      - abnormal_breathing
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: breathing_distress_with_voice
+    reasonTemplate: "{startSec}s-{endSec}s 疑似异常呼吸与恐惧、哭泣或痛苦类线索接近出现，建议重点复核。"
+
+  - insightType: possible_conflict
+    insightName: 疑似冲突聚集线索
+    reviewPriority: 80
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - voice_anger
+      - voice_tension
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: conflict_multi_signal_near
+    reasonTemplate: "{startSec}s-{endSec}s 多类冲突相关线索短时间接近出现，建议重点复核。"
+
+  - insightType: possible_physical_conflict
+    insightName: 疑似肢体冲突线索
+    sourceInsightTypes:
+      - suspected_physical_contact
+      - suspected_shouting
+      - voice_anger
+      - voice_tension
+      - suspected_screaming
+      - voice_fear
+      - suspected_blunt_impact
+    requiredInsightTypes:
+      - suspected_physical_contact
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: physical_contact_with_voice_or_impact
+    reasonTemplate: "{startSec}s-{endSec}s 疑似拍打或掌击声与人声异常、尖叫或撞击线索接近出现，建议重点复核。"
+
+  - insightType: possible_property_damage
+    insightName: 疑似破坏或打砸线索
+    sourceInsightTypes:
+      - suspected_breaking_damage
+      - suspected_door_impact
+      - suspected_shouting
+      - suspected_screaming
+      - voice_fear
+      - voice_tension
+    requiredInsightTypes:
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: breaking_damage_with_voice_or_door
+    reasonTemplate: "{startSec}s-{endSec}s 疑似破裂或损坏声与门体冲击、喊叫或紧张语音线索接近出现，建议重点复核。"
+
+  - insightType: possible_forced_entry_or_smashing
+    insightName: 疑似门体冲击或强行进入线索
+    sourceInsightTypes:
+      - suspected_door_impact
+      - suspected_shouting
+      - suspected_screaming
+      - voice_fear
+      - voice_tension
+      - suspected_breaking_damage
+    requiredInsightTypes:
+      - suspected_door_impact
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: need_attention
+    matchedRuleCode: door_impact_with_distress_or_damage
+    reasonTemplate: "{startSec}s-{endSec}s 疑似门体冲击与喊叫、恐惧、紧张或破裂线索接近出现，建议重点复核。"
+
+  - insightType: risky_knocking_with_voice
+    insightName: 疑似异常敲击伴随语音异常线索
+    sourceInsightTypes:
+      - suspected_knocking
+      - voice_fear
+      - voice_tension
+      - suspected_shouting
+      - suspected_door_impact
+      - suspected_breaking_damage
+    requiredInsightTypes:
+      - suspected_knocking
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: review_suggested
+    matchedRuleCode: knocking_with_distress_context
+    reasonTemplate: "{startSec}s-{endSec}s 疑似敲门或敲击声与人声异常、喊叫或门体冲击线索接近出现，建议复核。"
+
+  - insightType: voice_emotional_stress
+    insightName: 语音状态异常聚集线索
+    sourceInsightTypes:
+      - voice_tension
+      - voice_fear
+      - voice_anger
+      - voice_sadness
+      - voice_negative_valence
+      - voice_low_dominance
+    requiredAnyInsightTypes:
+      - voice_tension
+      - voice_fear
+      - voice_anger
+      - voice_sadness
+    minDistinctTypes: 2
+    minOccurrences: 2
+    withinSec: 20.0
+    conclusion: no_obvious_clue
+    reasonTemplate: "{startSec}s-{endSec}s 多种人声状态异常线索接近出现，当前仅作为内部辅助线索。"
+
+  - insightType: voice_distress_without_background_event
+    insightName: 人声异常但背景事件不明显线索
+    sourceInsightTypes:
+      - voice_tension
+      - voice_fear
+      - voice_negative_valence
+      - voice_low_dominance
+    requiredAnyInsightTypes:
+      - voice_tension
+      - voice_fear
+    minDistinctTypes: 2
+    minOccurrences: 2
+    withinSec: 20.0
+    conclusion: no_obvious_clue
+    reasonTemplate: "{startSec}s-{endSec}s 人声状态存在异常线索，但背景声音事件支持不足，当前仅作为内部辅助线索。"
+
+  - insightType: dense_conflict_signals_30s
+    insightName: 30秒内冲突线索密集出现
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    minOccurrences: 3
+    withinSec: 30.0
+    conclusion: need_attention
+    matchedRuleCode: dense_conflict_signals_30s
+    reasonTemplate: "{startSec}s-{endSec}s 30秒内多次出现冲突相关线索，建议重点复核。"
+
+  - insightType: dense_distress_signals_30s
+    insightName: 30秒内求助或痛苦线索密集出现
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_adult_crying
+      - suspected_infant_crying
+      - abnormal_breathing
+      - suspected_pain_or_discomfort
+      - voice_fear
+      - voice_sadness
+      - voice_low_dominance
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_adult_crying
+      - suspected_infant_crying
+      - abnormal_breathing
+      - suspected_pain_or_discomfort
+    minDistinctTypes: 2
+    minOccurrences: 3
+    withinSec: 30.0
+    conclusion: need_attention
+    matchedRuleCode: dense_distress_signals_30s
+    reasonTemplate: "{startSec}s-{endSec}s 30秒内多次出现求助、哭泣、痛苦或异常呼吸相关线索，建议重点复核。"
+
+attentionRules:
+  - code: screaming_high_confidence
+    insightType: suspected_screaming
+    conclusion: need_attention
+    maxScoreGte: 0.75
+    reasonTemplate: "{startSec}s-{endSec}s 出现较高置信疑似尖叫线索，建议重点复核。"
+
+  - code: screaming_repeated_or_sustained
+    insightType: suspected_screaming
+    conclusion: need_attention
+    all:
+      - maxScoreGte: 0.60
+      - any:
+          - occurrenceCountGte: 2
+          - totalDurationSecGte: 8.0
+    reasonTemplate: "{startSec}s-{endSec}s 疑似尖叫线索重复或持续出现，建议重点复核。"
+
+  - code: screaming_single_medium_review
+    insightType: suspected_screaming
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.60
+      - maxScoreLt: 0.75
+    reasonTemplate: "{startSec}s-{endSec}s 出现中等置信疑似尖叫线索，建议复核。"
+
+  - code: adult_crying_sustained_or_repeated
+    insightType: suspected_adult_crying
+    conclusion: need_attention
+    all:
+      - maxScoreGte: 0.55
+      - any:
+          - totalDurationSecGte: 8.0
+          - occurrenceCountGte: 2
+    reasonTemplate: "{startSec}s-{endSec}s 疑似成人哭泣线索持续或重复出现，建议重点复核。"
+
+  - code: infant_crying_sustained_review
+    insightType: suspected_infant_crying
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.55
+      - totalDurationSecGte: 8.0
+    reasonTemplate: "{startSec}s-{endSec}s 疑似婴幼儿哭声持续出现，建议复核。"
+
+  - code: critical_audio_event_attention
+    insightType: critical_audio_event
+    conclusion: need_attention
+    maxScoreGte: 0.45
+    reasonTemplate: "{startSec}s-{endSec}s 出现疑似强危险声音事件线索，建议重点复核。"
+
+  - code: critical_audio_event_medium_review
+    insightType: critical_audio_event
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.35
+      - maxScoreLt: 0.45
+    reasonTemplate: "{startSec}s-{endSec}s 出现中等置信疑似强危险声音事件线索，建议谨慎复核。"
+
+  - code: abnormal_breathing_medium_review
+    insightType: abnormal_breathing
+    conclusion: review_suggested
+    maxScoreGte: 0.55
+    reasonTemplate: "{startSec}s-{endSec}s 出现疑似异常呼吸线索，建议复核。"
+
+  - code: pain_or_discomfort_review
+    insightType: suspected_pain_or_discomfort
+    conclusion: review_suggested
+    maxScoreGte: 0.55
+    reasonTemplate: "{startSec}s-{endSec}s 出现疑似痛苦或不适声线索，建议复核。"
+
+  - code: repeated_blunt_impact_review
+    insightType: suspected_blunt_impact
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.55
+      - occurrenceCountGte: 2
+    reasonTemplate: "{startSec}s-{endSec}s 疑似撞击声重复出现，建议复核。"
+
+  - code: repeated_door_impact_review
+    insightType: suspected_door_impact
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.55
+      - occurrenceCountGte: 2
+    reasonTemplate: "{startSec}s-{endSec}s 疑似门体冲击线索重复出现，建议复核。"
+
+  - code: breaking_damage_high_review
+    insightType: suspected_breaking_damage
+    conclusion: review_suggested
+    maxScoreGte: 0.65
+    reasonTemplate: "{startSec}s-{endSec}s 出现较明显疑似破裂或损坏声线索，建议复核。"
+
+  - code: shouting_repeated_review
+    insightType: suspected_shouting
+    conclusion: review_suggested
+    all:
+      - maxScoreGte: 0.60
+      - occurrenceCountGte: 2
+    reasonTemplate: "{startSec}s-{endSec}s 疑似喊叫线索重复出现，建议复核。"
+
+  - code: child_shouting_review
+    insightType: suspected_child_shouting
+    conclusion: review_suggested
+    maxScoreGte: 0.55
+    reasonTemplate: "{startSec}s-{endSec}s 出现疑似儿童喊叫线索，建议复核。"
+
+suppressionRules:
+  - code: suppress_low_adult_crying_single
+    insightType: suspected_adult_crying
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - totalDurationSecLt: 8.0
+      - notNearInsightTypes:
+          - suspected_screaming
+          - abnormal_breathing
+          - suspected_pain_or_discomfort
+          - voice_fear
+          - voice_tension
+
+  - code: suppress_low_infant_crying_single
+    insightType: suspected_infant_crying
+    all:
+      - maxScoreLt: 0.55
+      - totalDurationSecLt: 8.0
+      - notNearInsightTypes:
+          - suspected_shouting
+          - suspected_child_shouting
+          - suspected_blunt_impact
+          - suspected_door_impact
+          - suspected_physical_contact
+          - suspected_breaking_damage
+
+  - code: suppress_low_shouting_single
+    insightType: suspected_shouting
+    all:
+      - maxScoreLt: 0.60
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - voice_anger
+          - voice_tension
+          - suspected_blunt_impact
+          - suspected_door_impact
+          - suspected_breaking_damage
+
+  - code: suppress_low_child_shouting_single
+    insightType: suspected_child_shouting
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - suspected_infant_crying
+          - suspected_blunt_impact
+          - suspected_door_impact
+          - suspected_breaking_damage
+
+  - code: suppress_low_blunt_impact_single
+    insightType: suspected_blunt_impact
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - suspected_screaming
+          - suspected_shouting
+          - voice_fear
+          - voice_tension
+
+  - code: suppress_low_door_impact_single
+    insightType: suspected_door_impact
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - suspected_screaming
+          - suspected_shouting
+          - voice_fear
+          - voice_tension
+          - suspected_breaking_damage
+
+  - code: suppress_safe_knocking_single
+    insightType: suspected_knocking
+    all:
+      - maxScoreLt: 0.70
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - voice_fear
+          - voice_tension
+          - suspected_shouting
+          - suspected_door_impact
+          - suspected_breaking_damage
+
+  - code: suppress_low_physical_contact_single
+    insightType: suspected_physical_contact
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - suspected_screaming
+          - suspected_shouting
+          - voice_anger
+          - voice_tension
+
+  - code: suppress_low_breaking_single
+    insightType: suspected_breaking_damage
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - suspected_screaming
+          - suspected_shouting
+          - suspected_door_impact
+          - voice_fear
+          - voice_tension
+
+  - code: suppress_low_breathing_single
+    insightType: abnormal_breathing
+    all:
+      - maxScoreLt: 0.55
+      - occurrenceCountLt: 2
+      - notNearInsightTypes:
+          - voice_fear
+          - voice_tension
+          - suspected_adult_crying
+          - suspected_infant_crying
+          - suspected_pain_or_discomfort
+
+  - code: suppress_aux_voice_neutral
+    insightType: voice_neutral
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_tension
+    insightType: voice_tension
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_fear
+    insightType: voice_fear
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_anger
+    insightType: voice_anger
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_sadness
+    insightType: voice_sadness
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_low_arousal
+    insightType: voice_low_arousal
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_negative_valence
+    insightType: voice_negative_valence
+    maxScoreGte: 0.0
+
+  - code: suppress_aux_voice_low_dominance
+    insightType: voice_low_dominance
+    maxScoreGte: 0.0
+
+conflictRules:
+  - code: audio_event_high_voice_low_arousal
+    insightType: background_conflict_voice_calm_low_arousal
+    insightName: 背景异常但人声低唤醒线索
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+      - voice_low_arousal
+    requiredInsightTypes:
+      - voice_low_arousal
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: review_suggested
+    matchedRuleCode: audio_event_high_voice_low_arousal
+    reasonTemplate: "{startSec}s-{endSec}s 背景声音存在异常线索，但人声低唤醒，建议人工复核以排除代报警、远距离收音或模型冲突。"
+
+  - code: audio_event_high_voice_neutral
+    insightType: background_conflict_voice_calm_neutral
+    insightName: 背景异常但人声中性线索
+    sourceInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+      - voice_neutral
+    requiredInsightTypes:
+      - voice_neutral
+    requiredAnyInsightTypes:
+      - suspected_screaming
+      - suspected_shouting
+      - suspected_child_shouting
+      - suspected_blunt_impact
+      - suspected_door_impact
+      - suspected_physical_contact
+      - suspected_breaking_damage
+    minDistinctTypes: 2
+    withinSec: 15.0
+    conclusion: review_suggested
+    matchedRuleCode: audio_event_high_voice_neutral
+    reasonTemplate: "{startSec}s-{endSec}s 背景声音存在异常线索，但人声偏中性，建议人工复核以排除背景干扰或模型冲突。"
+
+  - code: voice_abnormal_audio_event_normal
+    insightType: voice_abnormal_audio_event_normal
+    insightName: 人声异常但背景事件不明显线索
+    sourceInsightTypes:
+      - voice_tension
+      - voice_fear
+      - voice_anger
+      - voice_sadness
+      - voice_negative_valence
+      - voice_low_dominance
+    requiredAnyInsightTypes:
+      - voice_tension
+      - voice_fear
+      - voice_anger
+      - voice_sadness
+    minDistinctTypes: 2
+    minOccurrences: 2
+    withinSec: 20.0
+    conclusion: no_obvious_clue
+    matchedRuleCode: voice_abnormal_audio_event_normal
+    reasonTemplate: "{startSec}s-{endSec}s 人声状态异常线索聚集，但背景事件线索不足，当前仅作为内部辅助线索。"
+
+uncertaintyRules:
+  - code: multiple_speakers_uncertain
+    insightType: multiple_speakers_uncertainty
+    insightName: 多说话人不确定线索
+    trigger: speakerCountGte
+    speakerCountGte: 3
+    conclusion: no_obvious_clue
+    reasonTemplate: "{startSec}s-{endSec}s 识别到多个说话人标签，当前仅作为内部模型稳定性线索。"
+
+  - code: fragmented_voice_segments_uncertain
+    insightType: fragmented_voice_segments_uncertainty
+    insightName: 人声切片碎片化不确定线索
+    trigger: shortVoiceSegmentDensityGte
+    shortVoiceSegmentCountGte: 5
+    conclusion: no_obvious_clue
+    reasonTemplate: "{startSec}s-{endSec}s 人声切片较碎，当前仅作为内部模型稳定性线索。"
+
+overallAttentionAggregation:
+  needAttentionIfAnyConclusion: need_attention
+  reviewSuggestedIfAnyConclusion: review_suggested
+  noObviousClueOtherwise: true
+
+outputSchema:
+  externalFields:
+    - jobId
+    - jjdh
+    - state
+    - level
+    - levelName
+    - reviewSegments
+  internalTraceFields:
+    - attentionConclusion
+    - keyRiskFactors
+    - matchedCompositeInsights
+    - suppressedInsights
+    - conflictStatus
+    - uncertaintyStatus
+    - highRiskTimeRanges
+    - recommendedReviewTimeRanges
+    - debugInfo

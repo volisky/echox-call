@@ -1,0 +1,715 @@
+================================================================================
+  ECHOX-CALL 离线部署指南
+================================================================================
+
+目录
+  1. 目录结构说明
+  2. 第一步：源机器打包（有网环境）
+  3. 第二步：文件传输
+  4. 第三步：目标服务器部署
+  5. 第四步：配置参数总览（.env.docker）
+  6. 第五步：并发与性能调整
+  7. 离线 LLM 部署方案
+  8. 常用维护命令
+  9. 健康检查与验证
+
+================================================================================
+  1. 目录结构说明
+================================================================================
+
+传输到目标服务器的文件：
+
+  echox-call/
+  ├── docker-compose.yml          # 服务编排
+  ├── .env.docker                 # 运行时配置（从 .env.docker.example 复制并修改）
+  ├── .env.docker.example         # 配置模板
+  ├── migrations/                 # 数据库迁移 SQL（按版本号顺序执行）
+  ├── config/
+  │   ├── clients.yaml            # API 客户端密钥
+  │   ├── console_users.yaml      # 控制台用户
+  │   └── postcall_attention_rules.yaml   # 关注规则配置
+  ├── docs/
+  │   ├── postcall-beats-audioset-labels.csv
+  │   └── postcall-wavlm-output-labels.csv
+  ├── models/
+  │   ├── BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2/
+  │   │   └── BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
+  │   ├── speaker-diarization-community-1/
+  │   ├── wavlm-large/
+  │   └── wavlm-large-categorical-emotion/
+  └── data/
+      ├── postcall/               # 音频分析中间文件（运行时生成）
+      └── console_uploads/        # 控制台上传的音频文件
+
+================================================================================
+  2. 第一步：源机器打包（有网环境）
+================================================================================
+
+------------------------------------------------------------
+  2.1 构建并导出 Docker 镜像
+------------------------------------------------------------
+
+# 多行格式
+docker compose build
+docker save echox-call:cpu \
+  | gzip > echox-call-cpu.tar.gz
+docker pull postgres:16
+docker save postgres:16 \
+  | gzip > postgres16.tar.gz
+
+# 一行格式
+docker compose build && docker save echox-call:cpu | gzip > echox-call-cpu.tar.gz && docker pull postgres:16 && docker save postgres:16 | gzip > postgres16.tar.gz
+
+------------------------------------------------------------
+  2.2 打包项目文件
+------------------------------------------------------------
+
+# 多行格式（推荐：分开打包 models，因为较大）
+tar -czvf echox-call-project.tar.gz \
+  docker-compose.yml \
+  .env.docker.example \
+  migrations/ \
+  config/ \
+  docs/ \
+  scripts/
+
+tar -czvf echox-call-models.tar.gz \
+  models/
+
+# 一行格式
+tar -czvf echox-call-project.tar.gz docker-compose.yml .env.docker.example migrations/ config/ docs/ scripts/ && tar -czvf echox-call-models.tar.gz models/
+
+------------------------------------------------------------
+  2.3 确认打包完整性
+------------------------------------------------------------
+
+# 多行格式
+ls -lh \
+  echox-call-cpu.tar.gz \
+  postgres16.tar.gz \
+  echox-call-project.tar.gz \
+  echox-call-models.tar.gz
+
+# 一行格式
+ls -lh echox-call-cpu.tar.gz postgres16.tar.gz echox-call-project.tar.gz echox-call-models.tar.gz
+
+================================================================================
+  3. 第二步：文件传输
+================================================================================
+
+------------------------------------------------------------
+  3.1 scp 传输（示例）
+------------------------------------------------------------
+
+# 多行格式
+scp echox-call-cpu.tar.gz \
+    postgres16.tar.gz \
+    echox-call-project.tar.gz \
+    echox-call-models.tar.gz \
+    user@TARGET_SERVER:/opt/echox-call/
+
+# 一行格式
+scp echox-call-cpu.tar.gz postgres16.tar.gz echox-call-project.tar.gz echox-call-models.tar.gz user@TARGET_SERVER:/opt/echox-call/
+
+------------------------------------------------------------
+  3.2 rsync 传输（断点续传，大文件推荐）
+------------------------------------------------------------
+
+# 多行格式
+rsync -avz --progress \
+  echox-call-cpu.tar.gz \
+  postgres16.tar.gz \
+  echox-call-project.tar.gz \
+  echox-call-models.tar.gz \
+  user@TARGET_SERVER:/opt/echox-call/
+
+# 一行格式
+rsync -avz --progress echox-call-cpu.tar.gz postgres16.tar.gz echox-call-project.tar.gz echox-call-models.tar.gz user@TARGET_SERVER:/opt/echox-call/
+
+================================================================================
+  4. 第三步：目标服务器部署
+================================================================================
+
+------------------------------------------------------------
+  4.1 加载 Docker 镜像
+------------------------------------------------------------
+
+# 多行格式
+cd /opt/echox-call
+docker load < echox-call-cpu.tar.gz
+docker load < postgres16.tar.gz
+
+# 一行格式
+cd /opt/echox-call && docker load < echox-call-cpu.tar.gz && docker load < postgres16.tar.gz
+
+------------------------------------------------------------
+  4.2 解压项目文件
+------------------------------------------------------------
+
+# 多行格式
+cd /opt/echox-call
+tar -xzvf echox-call-project.tar.gz
+tar -xzvf echox-call-models.tar.gz
+mkdir -p data/postcall data/console_uploads
+
+# 一行格式
+cd /opt/echox-call && tar -xzvf echox-call-project.tar.gz && tar -xzvf echox-call-models.tar.gz && mkdir -p data/postcall data/console_uploads
+
+------------------------------------------------------------
+  4.3 创建配置文件
+------------------------------------------------------------
+
+# 多行格式
+cp .env.docker.example .env.docker
+# 然后编辑 .env.docker，参见第 5 节参数总览
+
+# 一行格式
+cp .env.docker.example .env.docker
+
+------------------------------------------------------------
+  4.4 在 docker-compose.yml 中添加内置 PostgreSQL（若无现有数据库）
+------------------------------------------------------------
+
+在 docker-compose.yml 的 services 块顶部添加：
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: echox
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: echox_call
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U echox -d echox_call"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+在文件末尾添加：
+
+  volumes:
+    postgres_data:
+
+同时将 .env.docker 中数据库地址改为：
+  DATABASE_URL=postgresql://echox:changeme@postgres:5432/echox_call
+
+并将其他所有服务的 extra_hosts 中 host.docker.internal 改为 postgres（仅数据库连接部分）。
+
+------------------------------------------------------------
+  4.5 初始化数据库并执行全量迁移
+------------------------------------------------------------
+
+# 多行格式（使用内置 postgres 服务）
+docker compose up -d postgres
+docker compose --profile tools run --rm db-init
+docker compose --profile tools run --rm migrate
+
+# 一行格式
+docker compose up -d postgres && docker compose --profile tools run --rm db-init && docker compose --profile tools run --rm migrate
+
+# 多行格式（使用外部已有数据库，跳过 db-init）
+docker compose --profile tools run --rm migrate
+
+# 一行格式
+docker compose --profile tools run --rm migrate
+
+------------------------------------------------------------
+  4.6 启动所有服务
+------------------------------------------------------------
+
+# 多行格式
+docker compose up -d \
+  api \
+  worker \
+  llm-worker \
+  console
+
+# 一行格式
+docker compose up -d api worker llm-worker console
+
+------------------------------------------------------------
+  4.7 查看服务状态
+------------------------------------------------------------
+
+# 多行格式
+docker compose ps
+docker compose logs -f api
+docker compose logs -f worker
+docker compose logs -f llm-worker
+
+# 一行格式
+docker compose ps && docker compose logs --tail=50 api worker llm-worker
+
+================================================================================
+  5. 第四步：配置参数总览（.env.docker）
+================================================================================
+
+以下为完整的 .env.docker 参数说明，带默认值。
+"[必填]" 表示必须显式设置，"[可选]" 表示有合理默认值。
+
+------------------------------------------------------------
+  5.1 服务端口映射
+------------------------------------------------------------
+
+# API 服务宿主机端口（容器内固定 8000）
+ECHOX_CALL_PORT=8000                      # 默认 8000
+
+# 控制台宿主机端口（容器内固定 8001）
+ECHOX_CALL_CONSOLE_PORT=8002              # 默认 8002
+
+------------------------------------------------------------
+  5.2 数据库连接 [必填，三选一]
+------------------------------------------------------------
+
+# 方式一：完整 DSN（推荐）
+DATABASE_URL=postgresql://user:password@host:5432/echox_call
+
+# 方式二：别名 DSN
+POSTGRES_DSN=postgresql://user:password@host:5432/echox_call
+PG_DSN=postgresql://user:password@host:5432/echox_call
+
+# 方式三：逐项配置
+PGHOST=localhost                          # 默认 localhost
+PGPORT=5432                               # 默认 5432
+PGDATABASE=echox_call                     # [必填]
+PGUSER=echox                              # [必填]
+PGPASSWORD=changeme
+PGSSLMODE=disable                         # disable / require / verify-full
+
+# 数据库连接池
+DB_CONNECT_TIMEOUT=5                      # 连接超时秒数，默认 5
+DB_POOL_MIN_SIZE=1                        # 最小连接数，默认 1
+DB_POOL_MAX_SIZE=5                        # 最大连接数，默认 5
+                                          # 高并发时建议设为 worker 数 × 3
+
+------------------------------------------------------------
+  5.3 音频 Worker 参数
+------------------------------------------------------------
+
+# 分析模式：full=完整模型全量分析，fast=仅部分模型快速分析
+POSTCALL_ANALYSIS_PROFILE=fast            # 默认 full，CPU 部署推荐 fast
+
+# 音频中间文件存储目录（容器内路径）
+POSTCALL_STORAGE_DIR=/app/data/postcall   # 默认 data/postcall
+
+# 时区（影响存储目录按日期分组）
+POSTCALL_STORAGE_TIMEZONE=Asia/Shanghai   # 默认 Asia/Shanghai，IANA 标准名
+
+# 每次轮询最多处理任务数
+POSTCALL_WORKER_BATCH_SIZE=1              # 默认 1
+
+# 任务锁定时长（秒），超时自动重试
+POSTCALL_WORKER_LOCK_SECONDS=600          # 默认 600
+
+# 失败重试间隔（指数退避）
+POSTCALL_WORKER_RETRY_BASE_DELAY_SECONDS=60    # 默认 60
+POSTCALL_WORKER_RETRY_MAX_DELAY_SECONDS=600    # 默认 600
+
+# 音频文件限制
+POSTCALL_AUDIO_MAX_BYTES=104857600        # 最大字节数，默认 100MB
+POSTCALL_AUDIO_MAX_DURATION_SEC=600       # 最大时长秒数，默认 600
+POSTCALL_AUDIO_DOWNLOAD_TIMEOUT_SEC=30    # 下载超时秒数，默认 30
+
+# BEATs 音频事件检测输出 TopK 数量
+POSTCALL_AUDIO_EVENT_TOP_K=20            # 默认 20
+
+# 推理设备
+POSTCALL_DEVICE=cpu                       # cpu 或 cuda（GPU 部署时改为 cuda）
+
+# CPU 线程数（不设则使用 PyTorch 默认，建议显式设置避免过度占用）
+POSTCALL_TORCH_NUM_THREADS=4             # [可选] 推理线程数
+POSTCALL_TORCH_INTEROP_THREADS=1         # [可选] 算子间并行线程数
+
+# 说话人分离人数（固定已知人数可提升准确率）
+POSTCALL_DIARIZATION_NUM_SPEAKERS=2      # 默认 2，设为 0 表示自动检测
+
+------------------------------------------------------------
+  5.4 音频 Worker 模型路径（容器内路径，默认值已对应 models/ 挂载）
+------------------------------------------------------------
+
+POSTCALL_BEATS_CHECKPOINT_PATH=/app/models/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
+POSTCALL_BEATS_LABELS_PATH=/app/docs/postcall-beats-audioset-labels.csv
+POSTCALL_DIARIZATION_MODEL_DIR=/app/models/speaker-diarization-community-1
+POSTCALL_WAVLM_EMOTION_MODEL_DIR=/app/models/wavlm-large-categorical-emotion
+POSTCALL_WAVLM_BACKBONE_DIR=/app/models/wavlm-large
+POSTCALL_WAVLM_LABELS_PATH=/app/docs/postcall-wavlm-output-labels.csv
+POSTCALL_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules.yaml
+
+------------------------------------------------------------
+  5.5 LLM Worker 参数
+------------------------------------------------------------
+
+# API 密钥 [必填]（优先读 LLM_API_KEY，不存在则读 ANTHROPIC_API_KEY）
+LLM_API_KEY=your-llm-api-key-here
+
+# OpenAI 兼容接口地址 [必填]
+LLM_BASE_URL=https://api.modelarts-maas.com/openai/v1
+# 离线部署示例（Ollama）：
+# LLM_BASE_URL=http://your-llm-server:11434/v1
+
+# 模型名称
+LLM_WORKER_MODEL=deepseek-v4-flash        # 默认 deepseek-v4-flash
+
+# 单次生成最大 token 数
+LLM_WORKER_MAX_TOKENS=1024               # 默认 1024
+
+# 每次轮询最多处理 LLM 任务数
+LLM_WORKER_BATCH_SIZE=3                  # 默认 3
+
+# LLM 任务锁定时长（秒）
+LLM_WORKER_LOCK_SECONDS=120              # 默认 120
+
+# LLM 失败重试间隔（指数退避）
+LLM_WORKER_RETRY_BASE_DELAY_SECONDS=30   # 默认 30
+LLM_WORKER_RETRY_MAX_DELAY_SECONDS=300   # 默认 300
+
+------------------------------------------------------------
+  5.6 挂载配置文件路径
+------------------------------------------------------------
+
+CLIENTS_CONFIG_PATH=/app/config/clients.yaml
+CONSOLE_USERS_CONFIG_PATH=/app/config/console_users.yaml
+
+------------------------------------------------------------
+  5.7 完整 .env.docker 示例（开箱即用模板）
+------------------------------------------------------------
+
+# ── 端口 ──────────────────────────────────────────────────
+ECHOX_CALL_PORT=8000
+ECHOX_CALL_CONSOLE_PORT=8002
+
+# ── 数据库 ────────────────────────────────────────────────
+DATABASE_URL=postgresql://echox:changeme@postgres:5432/echox_call
+
+# ── 音频 Worker ───────────────────────────────────────────
+POSTCALL_DEVICE=cpu
+POSTCALL_ANALYSIS_PROFILE=fast
+POSTCALL_STORAGE_DIR=/app/data/postcall
+POSTCALL_STORAGE_TIMEZONE=Asia/Shanghai
+POSTCALL_WORKER_BATCH_SIZE=1
+POSTCALL_WORKER_LOCK_SECONDS=600
+POSTCALL_AUDIO_MAX_BYTES=104857600
+POSTCALL_AUDIO_MAX_DURATION_SEC=600
+POSTCALL_AUDIO_DOWNLOAD_TIMEOUT_SEC=30
+POSTCALL_AUDIO_EVENT_TOP_K=20
+POSTCALL_TORCH_NUM_THREADS=4
+POSTCALL_TORCH_INTEROP_THREADS=1
+POSTCALL_DIARIZATION_NUM_SPEAKERS=2
+POSTCALL_BEATS_CHECKPOINT_PATH=/app/models/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
+POSTCALL_BEATS_LABELS_PATH=/app/docs/postcall-beats-audioset-labels.csv
+POSTCALL_DIARIZATION_MODEL_DIR=/app/models/speaker-diarization-community-1
+POSTCALL_WAVLM_EMOTION_MODEL_DIR=/app/models/wavlm-large-categorical-emotion
+POSTCALL_WAVLM_BACKBONE_DIR=/app/models/wavlm-large
+POSTCALL_WAVLM_LABELS_PATH=/app/docs/postcall-wavlm-output-labels.csv
+POSTCALL_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules.yaml
+
+# ── LLM Worker ────────────────────────────────────────────
+LLM_API_KEY=your-llm-api-key-here
+LLM_BASE_URL=http://your-llm-server:11434/v1
+LLM_WORKER_MODEL=deepseek-r1:7b
+LLM_WORKER_MAX_TOKENS=1024
+LLM_WORKER_BATCH_SIZE=3
+
+# ── 挂载配置 ──────────────────────────────────────────────
+CLIENTS_CONFIG_PATH=/app/config/clients.yaml
+CONSOLE_USERS_CONFIG_PATH=/app/config/console_users.yaml
+
+# ── 数据库连接池（高并发时调大）──────────────────────────
+DB_POOL_MIN_SIZE=2
+DB_POOL_MAX_SIZE=20
+
+================================================================================
+  6. 第五步：并发与性能调整
+================================================================================
+
+------------------------------------------------------------
+  6.1 横向扩容 Worker（Docker Compose）
+------------------------------------------------------------
+
+# 音频 Worker 扩容到 4 个进程（CPU 密集，不超过物理核数）
+# 多行格式
+docker compose up -d \
+  --scale worker=4
+
+# 一行格式
+docker compose up -d --scale worker=4
+
+# LLM Worker 扩容到 3 个进程（IO 密集，可多开）
+# 多行格式
+docker compose up -d \
+  --scale llm-worker=3
+
+# 一行格式
+docker compose up -d --scale llm-worker=3
+
+# 同时扩容两者
+# 多行格式
+docker compose up -d \
+  --scale worker=4 \
+  --scale llm-worker=3
+
+# 一行格式
+docker compose up -d --scale worker=4 --scale llm-worker=3
+
+------------------------------------------------------------
+  6.2 API 服务多进程（修改 docker-compose.yml）
+------------------------------------------------------------
+
+将 api 服务的 command 改为：
+  command: ["python", "-m", "echox_call.cli.api", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+
+------------------------------------------------------------
+  6.3 不同规格服务器的推荐配置
+------------------------------------------------------------
+
+  4 核 8G（入门）
+    worker 副本数：1
+    llm-worker 副本数：2
+    POSTCALL_TORCH_NUM_THREADS=4
+    DB_POOL_MAX_SIZE=10
+    LLM_WORKER_BATCH_SIZE=3
+
+  8 核 16G（推荐）
+    worker 副本数：2
+    llm-worker 副本数：3
+    POSTCALL_TORCH_NUM_THREADS=4
+    DB_POOL_MAX_SIZE=20
+    LLM_WORKER_BATCH_SIZE=5
+
+  16 核 32G（高负载）
+    worker 副本数：4
+    llm-worker 副本数：5
+    POSTCALL_TORCH_NUM_THREADS=4
+    DB_POOL_MAX_SIZE=40
+    LLM_WORKER_BATCH_SIZE=10
+
+  注：POSTCALL_TORCH_NUM_THREADS 建议固定为 4，避免多副本争抢 CPU 核心。
+
+================================================================================
+  7. 离线 LLM 部署方案
+================================================================================
+
+由于音频 Worker 和 LLM Worker 独立运行，LLM 接口只需提供 OpenAI 兼容 API，
+修改 .env.docker 中的 LLM_BASE_URL 和 LLM_WORKER_MODEL 即可切换。
+
+------------------------------------------------------------
+  7.1 Ollama（推荐，最简单）
+------------------------------------------------------------
+
+# 在有网机器上下载模型
+ollama pull deepseek-r1:7b
+
+# 导出镜像（如果用 Docker 运行 Ollama）
+docker pull ollama/ollama
+docker save ollama/ollama | gzip > ollama.tar.gz
+
+# 或者直接导出模型文件目录（~/.ollama/models/）
+tar -czvf ollama-models.tar.gz ~/.ollama/models/
+
+# 目标服务器上运行（原生安装方式）
+# 多行格式
+tar -xzvf ollama-models.tar.gz -C ~/
+ollama serve &
+
+# 一行格式
+tar -xzvf ollama-models.tar.gz -C ~/ && ollama serve &
+
+# .env.docker 配置
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_WORKER_MODEL=deepseek-r1:7b
+LLM_API_KEY=ollama
+
+------------------------------------------------------------
+  7.2 vLLM（GPU 服务器，高并发）
+------------------------------------------------------------
+
+# 在有网机器上下载模型（HuggingFace）
+python -c "from huggingface_hub import snapshot_download; snapshot_download('deepseek-ai/DeepSeek-R1-Distill-Qwen-7B', local_dir='./deepseek-7b')"
+
+# 打包模型
+tar -czvf deepseek-7b.tar.gz deepseek-7b/
+
+# 目标服务器上启动 vLLM
+# 多行格式
+docker run -d \
+  --gpus all \
+  -p 8080:8000 \
+  -v /opt/models:/models \
+  vllm/vllm-openai:latest \
+  --model /models/deepseek-7b \
+  --served-model-name deepseek-r1:7b
+
+# 一行格式
+docker run -d --gpus all -p 8080:8000 -v /opt/models:/models vllm/vllm-openai:latest --model /models/deepseek-7b --served-model-name deepseek-r1:7b
+
+# .env.docker 配置
+LLM_BASE_URL=http://host.docker.internal:8080/v1
+LLM_WORKER_MODEL=deepseek-r1:7b
+LLM_API_KEY=vllm
+
+================================================================================
+  8. 常用维护命令
+================================================================================
+
+------------------------------------------------------------
+  8.1 服务管理
+------------------------------------------------------------
+
+# 启动所有服务
+# 多行格式
+docker compose up -d \
+  api worker llm-worker console
+
+# 一行格式
+docker compose up -d api worker llm-worker console
+
+# 停止所有服务
+# 多行格式
+docker compose stop \
+  api worker llm-worker console
+
+# 一行格式
+docker compose stop api worker llm-worker console
+
+# 重启单个服务
+docker compose restart api
+docker compose restart worker
+docker compose restart llm-worker
+
+# 查看所有服务状态
+docker compose ps
+
+# 查看实时日志
+docker compose logs -f api
+docker compose logs -f worker
+docker compose logs -f llm-worker
+docker compose logs -f console
+
+# 查看最近 100 行日志
+docker compose logs --tail=100 worker
+docker compose logs --tail=100 llm-worker
+
+------------------------------------------------------------
+  8.2 数据库迁移（版本升级时执行）
+------------------------------------------------------------
+
+# 多行格式
+docker compose --profile tools run \
+  --rm migrate
+
+# 一行格式
+docker compose --profile tools run --rm migrate
+
+------------------------------------------------------------
+  8.3 数据库连通性检查
+------------------------------------------------------------
+
+# 多行格式
+docker compose --profile tools run \
+  --rm migrate \
+  python -m echox_call.cli.db ping
+
+# 一行格式
+docker compose --profile tools run --rm migrate python -m echox_call.cli.db ping
+
+------------------------------------------------------------
+  8.4 进入容器调试
+------------------------------------------------------------
+
+# 多行格式
+docker compose exec api \
+  bash
+
+docker compose exec worker \
+  bash
+
+# 一行格式
+docker compose exec api bash
+docker compose exec worker bash
+
+------------------------------------------------------------
+  8.5 清理与重置
+------------------------------------------------------------
+
+# 仅删除容器（保留数据卷）
+docker compose down
+
+# 删除容器并清理数据卷（危险！数据库数据将丢失）
+docker compose down -v
+
+================================================================================
+  9. 健康检查与验证
+================================================================================
+
+------------------------------------------------------------
+  9.1 服务健康检查
+------------------------------------------------------------
+
+# API 服务
+curl http://localhost:8000/health
+
+# 控制台服务
+curl http://localhost:8002/health
+
+------------------------------------------------------------
+  9.2 提交测试任务
+------------------------------------------------------------
+
+# 多行格式
+curl -X POST "http://localhost:8000/api/v1/postcall/jobs" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "jjdh": "TEST_DEPLOY_001",
+    "audioUrl": "http://your-audio-server/test.wav",
+    "bjsj": "2026-01-01T10:00:00+08:00",
+    "JCJXTJSDWMC": "测试单位",
+    "JJDWMC": "测试分局",
+    "GXDWMC": "测试派出所",
+    "bjdh": "13800000000",
+    "bjrmc": "测试人",
+    "bjrxbdm": 1,
+    "lxdh": "13800000000",
+    "jqdz": "测试地址",
+    "bjnr": "测试报警内容",
+    "jqlbdm": "纠纷",
+    "jqlxdm": "治安纠纷",
+    "jqdj": "一般"
+  }'
+
+# 一行格式
+curl -X POST "http://localhost:8000/api/v1/postcall/jobs" -H "Content-Type: application/json" -H "X-API-Key: YOUR_API_KEY" -d '{"jjdh":"TEST_DEPLOY_001","audioUrl":"http://your-audio-server/test.wav","bjsj":"2026-01-01T10:00:00+08:00","JCJXTJSDWMC":"测试单位","JJDWMC":"测试分局","GXDWMC":"测试派出所","bjdh":"13800000000","bjrmc":"测试人","bjrxbdm":1,"lxdh":"13800000000","jqdz":"测试地址","bjnr":"测试报警内容","jqlbdm":"纠纷","jqlxdm":"治安纠纷","jqdj":"一般"}'
+
+------------------------------------------------------------
+  9.3 查询任务结果
+------------------------------------------------------------
+
+# 多行格式
+curl "http://localhost:8000/api/v1/postcall/jobs/JOB_ID_HERE" \
+  -H "X-API-Key: YOUR_API_KEY"
+
+# 一行格式
+curl "http://localhost:8000/api/v1/postcall/jobs/JOB_ID_HERE" -H "X-API-Key: YOUR_API_KEY"
+
+------------------------------------------------------------
+  9.4 clients.yaml 中的 API Key 说明
+------------------------------------------------------------
+
+config/clients.yaml 文件定义了所有允许调用 API 的客户端及其密钥，格式如下：
+
+  clients:
+    - client_id: your_client_id
+      name: 客户端名称
+      api_key: 生成一个随机字符串作为密钥
+      source_system: your_client_id
+      enabled: true
+      allow_debug: false
+
+请求时在 Header 中携带：
+  X-API-Key: 上面 api_key 字段的值
+
+================================================================================
+  END
+================================================================================

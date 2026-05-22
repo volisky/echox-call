@@ -1,0 +1,81 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="section-panel upload-page">
+    {% if error_message %}
+      <div class="form-alert form-alert-error">
+        {{ error_message }}
+      </div>
+    {% endif %}
+
+    {% if result %}
+      <div class="form-alert form-alert-success upload-result">
+        <div>
+          <strong>任务已提交</strong>
+          <span class="mono-cell">jobId：{{ result.job_id }}</span>
+          <span>状态：{{ result.state }}{% if result.duplicate %}，已覆盖重跑，重复提交次数：{{ result.duplicate_count }}{% endif %}</span>
+        </div>
+        <a class="plain-button" href="/console/jobs/{{ result.job_id | urlencode }}">查看任务</a>
+      </div>
+    {% endif %}
+
+    <div class="upload-layout">
+      <form
+        class="upload-form upload-form-simple"
+        method="post"
+        action="/console/upload"
+        enctype="multipart/form-data"
+        data-upload-form
+      >
+        <div class="upload-card">
+          <div class="upload-card-header">
+            <div>
+              <div class="detail-kicker">console_upload</div>
+              <h2>上传音频</h2>
+            </div>
+            <span class="upload-mode-badge">真实任务</span>
+          </div>
+
+          <label class="upload-dropzone" data-upload-dropzone>
+            <input
+              id="audio-file"
+              name="audio_file"
+              type="file"
+              accept=".wav,.mp3,.m4a,.flac,.ogg,.aac,audio/*"
+              required
+              data-upload-file-input
+            >
+            <span class="upload-file-button">选择文件</span>
+            <span class="upload-dropzone-main">上传音频文件</span>
+            <span class="upload-file-name" data-upload-file-name>选择后会在这里显示文件名</span>
+          </label>
+
+          <div class="upload-meta-row">
+            <span>WAV / MP3 / M4A / FLAC / OGG / AAC</span>
+            <span>最大 100MB</span>
+          </div>
+
+          <div class="upload-actions">
+            <button class="primary-button" type="submit" data-upload-submit>提交分析任务</button>
+            <a class="plain-button" href="/console/jobs">返回任务列表</a>
+          </div>
+        </div>
+      </form>
+
+      <aside class="upload-side-panel" aria-label="提交信息">
+        <div class="upload-side-item">
+          <span>来源系统</span>
+          <strong>console_upload</strong>
+        </div>
+        <div class="upload-side-item">
+          <span>初始状态</span>
+          <strong>processing_queued</strong>
+        </div>
+        <div class="upload-side-item">
+          <span>接警信息</span>
+          <strong>自动生成</strong>
+        </div>
+      </aside>
+    </div>
+  </section>
+{% endblock %}

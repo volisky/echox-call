@@ -1,0 +1,46 @@
+# Runtime dependencies for local audio model checks.
+# Install inside the echox-call conda env:
+#   conda activate echox-call
+#   pip install -r requirements.txt
+
+# PyTorch stack. Keep torch/torchaudio versions aligned.
+# pyannote.audio 4.0.0 requires torch/torchaudio >= 2.8.0.
+torch==2.8.0
+torchaudio==2.8.0
+
+# Speaker diarization offline smoke test runtime.
+pyannote.audio==4.0.0
+
+# WavLM categorical emotion model runtime.
+transformers==4.46.3
+safetensors==0.5.3
+huggingface-hub==0.31.4
+tokenizers==0.20.3
+loralib==0.1.2
+speechbrain==1.0.3
+HyperPyYAML==1.2.2
+
+# Audio loading, resampling, and numerical utilities.
+# pyannote.core/metrics require newer numpy/scipy/soundfile.
+numpy>=2.2.2,<3
+scipy>=1.15.1,<2
+soundfile>=0.13.1,<0.14
+librosa==0.10.2.post1
+PyYAML==6.0.2
+tqdm==4.67.1
+requests==2.32.3
+sentencepiece==0.2.0
+
+# API service.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+httpx==0.28.1
+Jinja2==3.1.6
+
+# PostgreSQL connection layer.
+psycopg[binary,pool]>=3.2,<4
+python-dotenv==1.0.1
+
+# LLM worker: OpenAI-compatible API client.
+openai>=1.0.0

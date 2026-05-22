@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }} - 管理控制台</title>
+    <link rel="stylesheet" href="/console/static/console.css?v=20260521-win7-baseline">
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="login-brand">
+          <div class="brand-mark" aria-hidden="true">控</div>
+          <div>
+            <div class="brand-name">管理控制台</div>
+            <div class="brand-subtitle">任务运行管理</div>
+          </div>
+        </div>
+
+        <div class="login-heading">
+          <h1 id="login-title">控制台登录</h1>
+          <p>使用控制台账号访问任务查询和音频测试页面。</p>
+        </div>
+
+        {% if error_message %}
+          <div class="login-error">{{ error_message }}</div>
+        {% endif %}
+
+        <form class="login-form" method="post" action="/console/login">
+          <input type="hidden" name="next" value="{{ next_path }}">
+          <label>
+            <span>用户名</span>
+            <input name="username" value="{{ username }}" autocomplete="username" required autofocus>
+          </label>
+          <label>
+            <span>密码</span>
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="primary-button login-submit" type="submit">登录</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

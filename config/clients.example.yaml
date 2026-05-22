@@ -1,0 +1,7 @@
+clients:
+  - client_id: example_client
+    name: Example Client
+    api_key: replace-with-a-random-api-key
+    source_system: example_client
+    enabled: true
+    allow_debug: false

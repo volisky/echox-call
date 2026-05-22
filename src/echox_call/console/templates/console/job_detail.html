@@ -1,0 +1,316 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="section-panel detail-page">
+    <div class="detail-toolbar">
+      <a class="text-action" href="/console/jobs">返回任务列表</a>
+    </div>
+
+    {% if error_message %}
+      <div class="empty-state">
+        <div class="empty-icon" aria-hidden="true">!</div>
+        <div>
+          <h3>任务详情暂时不可用</h3>
+          <p>{{ error_message }}</p>
+        </div>
+      </div>
+    {% elif not_found %}
+      <div class="empty-state">
+        <div class="empty-icon" aria-hidden="true">□</div>
+        <div>
+          <h3>未找到分析任务</h3>
+          <p>没有查询到 jobId 为 {{ job_id }} 的 postcall_jobs 记录。</p>
+        </div>
+      </div>
+    {% elif detail %}
+      <div class="detail-summary">
+        <div>
+          <div class="detail-kicker">postcall_jobs</div>
+          <h2>{{ detail.job.job_id }}</h2>
+          <p>{{ detail.job.jjdh }}</p>
+        </div>
+        <span class="status-pill status-{{ detail.job.state_key }}">
+          <span class="status-mark" aria-hidden="true"></span>
+          {{ detail.job.state_label }}
+        </span>
+      </div>
+
+      <section class="detail-section" aria-labelledby="job-basic-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-basic-heading">接警基础信息</h3>
+        </div>
+        <dl class="detail-grid">
+          {% for field in detail.basic_fields %}
+            <div class="detail-field{{ field.span_class }}">
+              <dt>{{ field.label }}</dt>
+              <dd class="detail-value{{ field.class_name }}">{{ field.value }}</dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </section>
+
+      <section class="detail-section" aria-labelledby="job-runtime-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-runtime-heading">任务运行信息</h3>
+        </div>
+        <dl class="detail-grid">
+          {% for field in detail.runtime_fields %}
+            <div class="detail-field{{ field.span_class }}">
+              <dt>{{ field.label }}</dt>
+              <dd class="detail-value{{ field.class_name }}">{{ field.value }}</dd>
+            </div>
+          {% endfor %}
+          {% for field in detail.error_fields %}
+            <div class="detail-field{{ field.span_class }}">
+              <dt>{{ field.label }}</dt>
+              <dd class="detail-value{{ field.class_name }}">{{ field.value }}</dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </section>
+
+      <section class="detail-section" aria-labelledby="job-payload-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-payload-heading">案件原始信息</h3>
+        </div>
+        <div class="json-section-list">
+          {% for section in detail.json_sections %}
+            <details class="json-panel" open>
+              <summary>
+                <span>{{ section.title }}</span>
+                <span>{{ section.description }}</span>
+              </summary>
+              <pre>{{ section.content }}</pre>
+            </details>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="detail-section" aria-labelledby="job-rule-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-rule-heading">规则判断结果</h3>
+        </div>
+        {% if not detail.rule_summary_fields %}
+          <div class="result-empty">
+            当前任务还没有写入 postcall_analysis_results 规则判断结果。
+          </div>
+        {% else %}
+          <dl class="detail-grid">
+            {% for field in detail.rule_summary_fields %}
+              <div class="detail-field{{ field.span_class }}">
+                <dt>{{ field.label }}</dt>
+                <dd class="detail-value{{ field.class_name }}">{{ field.value }}</dd>
+              </div>
+            {% endfor %}
+          </dl>
+
+          {% if detail.rule_insights %}
+            <div class="data-table-frame" role="region" aria-label="规则线索表格" tabindex="0">
+              <table class="jobs-table result-table rule-table">
+                <colgroup>
+                  <col class="col-rule-name">
+                  <col class="col-rule-time">
+                  <col class="col-rule-count">
+                  <col class="col-rule-score">
+                  <col class="col-rule-confidence">
+                  <col class="col-rule-code">
+                  <col class="col-rule-reason">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>线索</th>
+                    <th>时间</th>
+                    <th>次数/时长</th>
+                    <th>最高/平均</th>
+                    <th>置信度</th>
+                    <th>命中规则</th>
+                    <th>原因</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in detail.rule_insights %}
+                    <tr>
+                      <td>
+                        <div>{{ row.insight_name }}</div>
+                        <div class="table-subtle mono-cell">{{ row.insight_type }}</div>
+                      </td>
+                      <td>{{ row.time_range }}</td>
+                      <td>{{ row.occurrence_count }} / {{ row.duration_text }}</td>
+                      <td>{{ row.max_score }} / {{ row.avg_score }}</td>
+                      <td>{{ row.confidence }}</td>
+                      <td class="rule-code-cell">{{ row.matched_rule_codes }}</td>
+                      <td class="rule-reason-cell">{{ row.reason }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="result-empty result-empty-stacked">
+              规则判断已执行，当前没有生成复核片段。
+            </div>
+          {% endif %}
+        {% endif %}
+      </section>
+
+      <section class="detail-section" aria-labelledby="job-analysis-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-analysis-heading">模型输出时间线</h3>
+        </div>
+        {% if detail.job.has_local_audio %}
+          <div class="audio-player-panel">
+            <div>
+              <div class="detail-kicker">完整音频</div>
+              <div class="audio-current-segment" data-current-segment>{{ detail.job.local_audio_asset_label }}，未选择片段</div>
+            </div>
+            <audio
+              controls
+              preload="metadata"
+              src="/console/jobs/{{ detail.job.job_id | urlencode }}/audio"
+              data-job-audio
+            ></audio>
+          </div>
+        {% else %}
+          <div class="result-empty">
+            未找到该任务已下载到本地的音频文件。请确认 worker 已写入 postcall_audio_assets 且本地文件仍存在。
+          </div>
+        {% endif %}
+        {% if not detail.timeline_segments %}
+          <div class="result-empty">
+            当前任务还没有写入 postcall_timeline_segments。
+          </div>
+        {% else %}
+          <div class="data-table-frame" role="region" aria-label="时间线片段表格" tabindex="0">
+            <table class="jobs-table result-table timeline-table">
+              <colgroup>
+                <col class="col-audio-action">
+                <col class="col-segment">
+                <col class="col-time-range">
+                <col class="col-source">
+                <col class="col-speaker">
+                <col class="col-score">
+                <col class="col-score">
+                <col class="col-dimension">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>音频</th>
+                  <th>片段</th>
+                  <th>时间</th>
+                  <th>来源</th>
+                  <th>说话人</th>
+                  <th>声音事件</th>
+                  <th>人声状态</th>
+                  <th>连续维度</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in detail.timeline_segments %}
+                  <tr data-segment-row="{{ row.segment_id }}">
+                    <td>
+                      {% if detail.job.has_local_audio and row.start_sec %}
+                        <button
+                          class="segment-play-button"
+                          type="button"
+                          aria-label="播放 {{ row.segment_id }} {{ row.time_range }}"
+                          data-segment-play
+                          data-segment-id="{{ row.segment_id }}"
+                          data-start-sec="{{ row.start_sec }}"
+                          data-end-sec="{{ row.end_sec }}"
+                        >播放</button>
+                      {% else %}
+                        -
+                      {% endif %}
+                    </td>
+                    <td class="mono-cell">{{ row.segment_id }}</td>
+                    <td>{{ row.time_range }}</td>
+                    <td class="mono-cell">{{ row.role_source }}</td>
+                    <td>{{ row.speaker_text }}</td>
+                    <td class="timeline-text-cell" title="{{ row.audio_event_top }}">{{ row.audio_event_top }}</td>
+                    <td class="timeline-text-cell" title="{{ row.voice_emotion_top }}">{{ row.voice_emotion_top }}</td>
+                    <td class="timeline-text-cell" title="{{ row.dimension_text }}">{{ row.dimension_text }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="detail-section" aria-labelledby="job-model-runs-heading">
+        <div class="detail-section-heading">
+          <h3 id="job-model-runs-heading">模型运行记录</h3>
+        </div>
+        {% if not detail.model_runs %}
+          <div class="result-empty">当前任务还没有写入 postcall_model_runs。</div>
+        {% else %}
+          <div class="data-table-frame" role="region" aria-label="模型运行记录表格" tabindex="0">
+            <table class="jobs-table result-table model-runs-table">
+              <colgroup>
+                <col class="col-model-name">
+                <col class="col-model-role">
+                <col class="col-status">
+                <col class="col-duration">
+                <col class="col-time">
+                <col class="col-time">
+                <col class="col-json-summary">
+                <col class="col-json-summary">
+                <col class="col-error">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>模型</th>
+                  <th>角色</th>
+                  <th>状态</th>
+                  <th>耗时</th>
+                  <th>开始时间</th>
+                  <th>完成时间</th>
+                  <th>输出摘要</th>
+                  <th>指标</th>
+                  <th>错误</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in detail.model_runs %}
+                  <tr>
+                    <td title="{{ row.model_name }}">
+                      <div>{{ row.model_name }}</div>
+                      <div class="table-subtle mono-cell">{{ row.model_version }}</div>
+                    </td>
+                    <td class="mono-cell">{{ row.model_role }}</td>
+                    <td>{{ row.status }}</td>
+                    <td>{{ row.duration_text }}</td>
+                    <td>{{ row.started_at_text }}</td>
+                    <td>{{ row.completed_at_text }}</td>
+                    <td title="{{ row.output_summary }}">{{ row.output_summary }}</td>
+                    <td title="{{ row.metrics }}">{{ row.metrics }}</td>
+                    <td title="{{ row.error_title }}">{{ row.error_text }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+
+      {% if detail.analysis_json_sections %}
+        <section class="detail-section" aria-labelledby="job-analysis-json-heading">
+          <div class="detail-section-heading">
+            <h3 id="job-analysis-json-heading">分析结果快照</h3>
+          </div>
+          <div class="json-section-list">
+            {% for section in detail.analysis_json_sections %}
+              <details class="json-panel" open>
+                <summary>
+                  <span>{{ section.title }}</span>
+                  <span>{{ section.description }}</span>
+                </summary>
+                <pre>{{ section.content }}</pre>
+              </details>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="section-panel">
+    <div class="section-heading">
+      <div>
+        <h2>{{ placeholder_title }}</h2>
+        <p>本阶段只保留页面结构和交互基线，不伪造业务数据。</p>
+      </div>
+      <span class="badge">待接入</span>
+    </div>
+
+    <div class="empty-state">
+      <div class="empty-icon" aria-hidden="true">□</div>
+      <div>
+        <h3>下一步实现范围</h3>
+        <ul>
+          {% for item in placeholder_items %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+

@@ -1,0 +1,63 @@
+# Python/cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# OS/editor artifacts
+.DS_Store
+._*
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.docker.example
+*.local
+config/clients.yaml
+config/console_users.yaml
+!config/*.example.yaml
+
+# Runtime data and uploads
+data/
+logs/
+*.log
+*.pid
+
+# Models and model archives
+models/
+models.zip
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.bin
+
+# Build/package outputs
+dist/
+build/
+*.egg-info/
+*.tar
+*.tar.gz
+*.zip
+
+# Temporary command artifacts
+=
+naming
+resolving
+unpacking

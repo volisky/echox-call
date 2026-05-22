@@ -1,0 +1,234 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="section-panel">
+    <div class="section-heading jobs-heading">
+      <div>
+        <h2>任务列表</h2>
+      </div>
+      <form class="filter-form" method="post" action="/console/jobs">
+        <label class="filter-control">
+          <span>关键词</span>
+          <input
+            name="q"
+            type="search"
+            value="{{ filters.keyword or '' }}"
+            placeholder="接警单号 / jobId / 来源"
+          >
+        </label>
+        <label class="filter-control">
+          <span>状态</span>
+          <select name="state">
+            <option value="">全部</option>
+            {% for option in state_options %}
+              <option value="{{ option }}" {% if filters.state == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="filter-control">
+          <span>来源</span>
+          <select name="source_system">
+            <option value="">全部</option>
+            {% for option in source_system_options %}
+              <option value="{{ option }}" {% if filters.source_system == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <input type="hidden" name="page" value="1">
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+        <button class="plain-button" type="submit">筛选</button>
+        <button class="text-action" type="submit" name="clear" value="1">清除</button>
+      </form>
+    </div>
+
+    {% if error_message %}
+      <div class="empty-state">
+        <div class="empty-icon" aria-hidden="true">!</div>
+        <div>
+          <h3>任务数据暂时不可用</h3>
+          <p>{{ error_message }}</p>
+        </div>
+      </div>
+    {% else %}
+      <div class="data-table-frame" role="region" aria-label="分析任务表格" tabindex="0">
+        <table class="jobs-table">
+          <colgroup>
+            <col class="col-sequence">
+            <col class="col-job-id">
+            <col class="col-jjdh">
+            <col class="col-status">
+            <col class="col-analysis-result">
+            <col class="col-source">
+            <col class="col-time">
+            <col class="col-time">
+            <col class="col-duration">
+            <col class="col-count">
+            <col class="col-error">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>jobId</th>
+              <th>接警单号</th>
+              <th>状态</th>
+              <th>分析结果</th>
+              <th>来源系统</th>
+              <th>报警时间</th>
+              <th>创建时间</th>
+              <th>耗时</th>
+              <th>重复</th>
+              <th>错误摘要</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if rows %}
+              {% for row in rows %}
+                <tr>
+                  <td>{{ row.sequence }}</td>
+                  <td class="mono-cell" title="{{ row.job_id }}">
+                    <a
+                      class="table-link"
+                      href="/console/jobs/{{ row.job_id | urlencode }}"
+                      data-job-drawer-link
+                      data-drawer-url="/console/jobs/{{ row.job_id | urlencode }}/drawer"
+                    >{{ row.job_id }}</a>
+                  </td>
+                  <td class="mono-cell" title="{{ row.jjdh }}">{{ row.jjdh }}</td>
+                  <td>
+                    <span class="status-pill status-{{ row.state_key }}">
+                      <span class="status-mark" aria-hidden="true"></span>
+                      {{ row.state_label }}
+                    </span>
+                  </td>
+                  <td title="{{ row.analysis_result_title }}">
+                    <span class="analysis-result-pill analysis-result-{{ row.analysis_result_key }}">
+                      {{ row.analysis_result_text }}
+                    </span>
+                  </td>
+                  <td>{{ row.source_system }}</td>
+                  <td>{{ row.bjsj_text }}</td>
+                  <td>{{ row.created_at_text }}</td>
+                  <td>{{ row.duration_text }}</td>
+                  <td>{{ row.duplicate_count }}</td>
+                  <td title="{{ row.error_title }}">{{ row.error_text }}</td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr class="table-empty-row">
+                <td class="table-empty-cell" colspan="11">
+                  <div class="table-empty-message">
+                    <strong>没有匹配的分析任务</strong>
+                    <span>当前筛选条件下没有 postcall_jobs 记录。</span>
+                    {% if filters.keyword or filters.state or filters.source_system %}
+                      <div class="table-footer-filters empty-filters">
+                        {% if filters.keyword %}<span>关键词：{{ filters.keyword }}</span>{% endif %}
+                        {% if filters.state %}<span>状态：{{ filters.state }}</span>{% endif %}
+                        {% if filters.source_system %}<span>来源：{{ filters.source_system }}</span>{% endif %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if rows %}
+        <div class="table-pagination">
+          <div class="table-footer-meta">
+            <div class="table-footer-primary">
+              <span>共 {{ total }} 条记录</span>
+              <span>当前显示 {{ page_start }}-{{ page_end }} 条</span>
+              <span>第 {{ page }} / {{ total_pages }} 页</span>
+              <form class="page-size-form" method="post" action="/console/jobs">
+                <input type="hidden" name="q" value="{{ filters.keyword or '' }}">
+                <input type="hidden" name="state" value="{{ filters.state or '' }}">
+                <input type="hidden" name="source_system" value="{{ filters.source_system or '' }}">
+                <input type="hidden" name="page" value="1">
+                <label>
+                  <span>每页</span>
+                  <select name="page_size" onchange="this.form.submit()">
+                    {% for option in [10, 20, 50, 100] %}
+                      <option value="{{ option }}" {% if page_size == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                  </select>
+                  <span>条</span>
+                </label>
+              </form>
+            </div>
+            {% if filters.keyword or filters.state or filters.source_system %}
+              <div class="table-footer-filters">
+                <span>筛选条件</span>
+                {% if filters.keyword %}<span>关键词：{{ filters.keyword }}</span>{% endif %}
+                {% if filters.state %}<span>状态：{{ filters.state }}</span>{% endif %}
+                {% if filters.source_system %}<span>来源：{{ filters.source_system }}</span>{% endif %}
+              </div>
+            {% endif %}
+          </div>
+          <div class="pagination-actions">
+            {% if prev_page %}
+              <form class="pagination-form" method="post" action="/console/jobs">
+                <input type="hidden" name="q" value="{{ filters.keyword or '' }}">
+                <input type="hidden" name="state" value="{{ filters.state or '' }}">
+                <input type="hidden" name="source_system" value="{{ filters.source_system or '' }}">
+                <input type="hidden" name="page_size" value="{{ page_size }}">
+                <input type="hidden" name="page" value="{{ prev_page }}">
+                <button class="pagination-link" type="submit">上一页</button>
+              </form>
+            {% else %}
+              <span class="pagination-link is-disabled">上一页</span>
+            {% endif %}
+
+            {% for item in pagination_items %}
+              {% if item.ellipsis %}
+                <span class="pagination-page is-ellipsis">{{ item.label }}</span>
+              {% elif item.current %}
+                <span class="pagination-page is-current" aria-current="page">{{ item.label }}</span>
+              {% else %}
+                <form class="pagination-form" method="post" action="/console/jobs">
+                  <input type="hidden" name="q" value="{{ filters.keyword or '' }}">
+                  <input type="hidden" name="state" value="{{ filters.state or '' }}">
+                  <input type="hidden" name="source_system" value="{{ filters.source_system or '' }}">
+                  <input type="hidden" name="page_size" value="{{ page_size }}">
+                  <input type="hidden" name="page" value="{{ item.page }}">
+                  <button class="pagination-page" type="submit">{{ item.label }}</button>
+                </form>
+              {% endif %}
+            {% endfor %}
+
+            {% if next_page %}
+              <form class="pagination-form" method="post" action="/console/jobs">
+                <input type="hidden" name="q" value="{{ filters.keyword or '' }}">
+                <input type="hidden" name="state" value="{{ filters.state or '' }}">
+                <input type="hidden" name="source_system" value="{{ filters.source_system or '' }}">
+                <input type="hidden" name="page_size" value="{{ page_size }}">
+                <input type="hidden" name="page" value="{{ next_page }}">
+                <button class="pagination-link" type="submit">下一页</button>
+              </form>
+            {% else %}
+              <span class="pagination-link is-disabled">下一页</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <div class="job-drawer-root" data-job-drawer hidden aria-hidden="true">
+    <button class="job-drawer-backdrop" type="button" data-drawer-close aria-label="关闭任务详情抽屉"></button>
+    <aside class="job-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="job-drawer-title" tabindex="-1">
+      <header class="job-drawer-header">
+        <div>
+          <div class="detail-kicker">postcall_jobs</div>
+          <h2 id="job-drawer-title">任务详情</h2>
+        </div>
+        <button class="drawer-close-button" type="button" data-drawer-close>关闭</button>
+      </header>
+      <div class="job-drawer-content" data-job-drawer-content>
+        <div class="drawer-loading">请选择一条任务查看详情。</div>
+      </div>
+    </aside>
+  </div>
+
+{% endblock %}

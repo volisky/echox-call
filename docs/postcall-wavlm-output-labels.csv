@@ -1,0 +1,30 @@
+output_group,index,key,name_en,name_zh,api_field,db_segment_column,db_event_type,db_event_code,db_event_name,db_event_name_en,db_native_label,zh_note
+emotion,0,Anger,Anger,愤怒,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Anger,愤怒,Anger,emotion_index_0,愤怒/恼怒倾向；可作为强烈负向情绪线索，不等于冲突结论
+emotion,1,Contempt,Contempt,轻蔑,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Contempt,轻蔑,Contempt,emotion_index_1,轻蔑/不满倾向；通常只作为情绪上下文
+emotion,2,Disgust,Disgust,厌恶,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Disgust,厌恶,Disgust,emotion_index_2,厌恶倾向；通常只作为情绪上下文
+emotion,3,Fear,Fear,恐惧,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Fear,恐惧,Fear,emotion_index_3,恐惧/害怕倾向；可作为报警音频重点关注的人声状态线索
+emotion,4,Happiness,Happiness,高兴,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Happiness,高兴,Happiness,emotion_index_4,开心/愉悦倾向；通常用于排除强负向情绪
+emotion,5,Neutral,Neutral,中性,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Neutral,中性,Neutral,emotion_index_5,中性情绪倾向；不等于“现场平稳”结论
+emotion,6,Sadness,Sadness,悲伤,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Sadness,悲伤,Sadness,emotion_index_6,悲伤/低落倾向；可与哭泣声音事件一起作为求助或痛苦线索
+emotion,7,Surprise,Surprise,惊讶,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Surprise,惊讶,Surprise,emotion_index_7,惊讶倾向；需要结合上下文解释
+emotion,8,Other,Other,其他,timeline[].voiceEmotionScores[],postcall_timeline_segments.voice_emotion_scores,voice_emotion_score,Other,其他,Other,emotion_index_8,其他情绪或无法归入前 8 类；不应解释成具体状态
+detailed,0,detailed_index_0,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_0,,,detailed_index_0,细粒度类别 0，标签名未确认，只保存 index 和 score
+detailed,1,detailed_index_1,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_1,,,detailed_index_1,细粒度类别 1，标签名未确认，只保存 index 和 score
+detailed,2,detailed_index_2,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_2,,,detailed_index_2,细粒度类别 2，标签名未确认，只保存 index 和 score
+detailed,3,detailed_index_3,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_3,,,detailed_index_3,细粒度类别 3，标签名未确认，只保存 index 和 score
+detailed,4,detailed_index_4,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_4,,,detailed_index_4,细粒度类别 4，标签名未确认，只保存 index 和 score
+detailed,5,detailed_index_5,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_5,,,detailed_index_5,细粒度类别 5，标签名未确认，只保存 index 和 score
+detailed,6,detailed_index_6,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_6,,,detailed_index_6,细粒度类别 6，标签名未确认，只保存 index 和 score
+detailed,7,detailed_index_7,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_7,,,detailed_index_7,细粒度类别 7，标签名未确认，只保存 index 和 score
+detailed,8,detailed_index_8,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_8,,,detailed_index_8,细粒度类别 8，标签名未确认，只保存 index 和 score
+detailed,9,detailed_index_9,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_9,,,detailed_index_9,细粒度类别 9，标签名未确认，只保存 index 和 score
+detailed,10,detailed_index_10,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_10,,,detailed_index_10,细粒度类别 10，标签名未确认，只保存 index 和 score
+detailed,11,detailed_index_11,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_11,,,detailed_index_11,细粒度类别 11，标签名未确认，只保存 index 和 score
+detailed,12,detailed_index_12,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_12,,,detailed_index_12,细粒度类别 12，标签名未确认，只保存 index 和 score
+detailed,13,detailed_index_13,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_13,,,detailed_index_13,细粒度类别 13，标签名未确认，只保存 index 和 score
+detailed,14,detailed_index_14,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_14,,,detailed_index_14,细粒度类别 14，标签名未确认，只保存 index 和 score
+detailed,15,detailed_index_15,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_15,,,detailed_index_15,细粒度类别 15，标签名未确认，只保存 index 和 score
+detailed,16,detailed_index_16,,,internal_only_not_returned,postcall_timeline_segments.voice_detailed_scores,voice_detailed_score,detailed_index_16,,,detailed_index_16,细粒度类别 16，标签名未确认，只保存 index 和 score
+dimension,,arousal,Arousal,唤醒度,timeline[].voiceEmotionDimensions.arousal,postcall_timeline_segments.voice_emotion_dimensions,voice_emotion_dimension,arousal,唤醒度,Arousal,dimension_arousal,情绪唤醒度/激活水平；数值高表示声音更激烈或更兴奋，不直接等于“激动”结论
+dimension,,valence,Valence,情绪效价,timeline[].voiceEmotionDimensions.valence,postcall_timeline_segments.voice_emotion_dimensions,voice_emotion_dimension,valence,情绪效价,Valence,dimension_valence,情绪正负向；数值低更偏负向，数值高更偏正向，不直接等于“痛苦”结论
+dimension,,dominance,Dominance,控制感,timeline[].voiceEmotionDimensions.dominance,postcall_timeline_segments.voice_emotion_dimensions,voice_emotion_dimension,dominance,控制感,Dominance,dimension_dominance,控制感/支配感；数值低可能表示弱势或失控倾向，但第一版只保存数值

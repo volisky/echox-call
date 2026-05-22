@@ -1,0 +1,9 @@
+session:
+  secret: replace-with-a-random-session-secret-before-deploy
+  max_age_seconds: 28800
+
+users:
+  - username: admin
+    name: Administrator
+    password: replace-with-a-strong-password
+    enabled: true

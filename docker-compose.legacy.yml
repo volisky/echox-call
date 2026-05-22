@@ -1,0 +1,114 @@
+services:
+  db-init:
+    image: postgres:16
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - sh
+      - -c
+      - |
+        export PGPASSWORD="$${POSTGRES_PASSWORD}"
+        until pg_isready -h "$${POSTGRES_HOST}" -p "$${POSTGRES_PORT}" -U "$${POSTGRES_USER}" -d "$${POSTGRES_ADMIN_DB}"; do
+          echo "waiting for existing postgres at $${POSTGRES_HOST}:$${POSTGRES_PORT}"
+          sleep 2
+        done
+        psql -h "$${POSTGRES_HOST}" -p "$${POSTGRES_PORT}" -U "$${POSTGRES_USER}" -d "$${POSTGRES_ADMIN_DB}" -v target_db="$${POSTGRES_DB}" <<'SQL'
+        SELECT 'CREATE DATABASE ' || quote_ident(:'target_db')
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pg_database WHERE datname = :'target_db'
+        )
+        \gexec
+        SQL
+    profiles:
+      - tools
+
+  migrate:
+    build:
+      context: .
+    image: echox-call:cpu
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.db", "migrate"]
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
+    profiles:
+      - tools
+
+  api:
+    build:
+      context: .
+    image: echox-call:cpu
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.api", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${ECHOX_CALL_PORT:-8000}:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
+    restart: unless-stopped
+
+  worker:
+    image: echox-call:cpu
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.worker", "--loop"]
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
+    restart: unless-stopped
+
+  llm-worker:
+    image: echox-call:cpu
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.llm_worker", "--loop"]
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    restart: unless-stopped
+
+  console:
+    image: echox-call:cpu
+    env_file:
+      - .env.docker.example
+      - .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.console", "--host", "0.0.0.0", "--port", "8001"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${ECHOX_CALL_CONSOLE_PORT:-8002}:8001"
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
+    restart: unless-stopped

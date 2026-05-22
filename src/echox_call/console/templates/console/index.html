@@ -1,0 +1,77 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="metric-grid" aria-label="运行指标">
+    <article class="metric-card metric-total">
+      <div class="metric-card-top">
+        <div class="metric-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 5h16" />
+            <path d="M4 12h16" />
+            <path d="M4 19h16" />
+          </svg>
+        </div>
+        <div class="metric-label">分析总数</div>
+      </div>
+      <div class="metric-value">{{ summary.total }}</div>
+    </article>
+    <article class="metric-card metric-pending">
+      <div class="metric-card-top">
+        <div class="metric-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 7v5l3 2" />
+            <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </div>
+        <div class="metric-label">待处理任务</div>
+      </div>
+      <div class="metric-value">{{ summary.pending }}</div>
+    </article>
+    <article class="metric-card metric-active">
+      <div class="metric-card-top">
+        <div class="metric-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 13h4l2-6 4 10 2-4h4" />
+          </svg>
+        </div>
+        <div class="metric-label">分析中</div>
+      </div>
+      <div class="metric-value">{{ summary.active }}</div>
+    </article>
+    <article class="metric-card metric-completed">
+      <div class="metric-card-top">
+        <div class="metric-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="m6 12 4 4 8-8" />
+            <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </div>
+        <div class="metric-label">今日完成</div>
+      </div>
+      <div class="metric-value">{{ summary.today_completed }}</div>
+    </article>
+    <article class="metric-card metric-failed">
+      <div class="metric-card-top">
+        <div class="metric-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 8v5" />
+            <path d="M12 17h.01" />
+            <path d="M10.3 4.2 2.8 17.1A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.9L13.7 4.2a2 2 0 0 0-3.4 0Z" />
+          </svg>
+        </div>
+        <div class="metric-label">失败任务</div>
+      </div>
+      <div class="metric-value">{{ summary.failed }}</div>
+    </article>
+  </section>
+
+  {% if error_message %}
+    <div class="empty-state">
+      <div class="empty-icon" aria-hidden="true">!</div>
+      <div>
+        <h3>首页数据暂时不可用</h3>
+        <p>{{ error_message }}</p>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
