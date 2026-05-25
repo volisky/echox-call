@@ -1,7 +1,111 @@
 {% extends "console/base.html" %}
 
 {% block content %}
-  <section class="section-panel">
+  <style>
+    .jobs-plain-page {
+      display: block;
+      min-height: 360px;
+      padding-bottom: 24px;
+      background: #ffffff;
+      color: #1f1f1f;
+    }
+
+    .jobs-plain-page .section-heading,
+    .jobs-plain-page .jobs-heading,
+    .jobs-plain-page .filter-form,
+    .jobs-plain-page .table-pagination,
+    .jobs-plain-page .table-footer-primary,
+    .jobs-plain-page .pagination-actions {
+      display: block;
+    }
+
+    .jobs-plain-page .filter-form {
+      margin-top: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #e5e5e5;
+    }
+
+    .jobs-plain-page .filter-control {
+      display: inline-block;
+      margin: 0 12px 10px 0;
+      vertical-align: top;
+    }
+
+    .jobs-plain-page .filter-control span {
+      display: block;
+      margin-bottom: 4px;
+      color: #666666;
+      font-size: 12px;
+    }
+
+    .jobs-plain-page .filter-control input,
+    .jobs-plain-page .filter-control select {
+      width: 180px;
+      height: 30px;
+      border: 1px solid #d4d4d4;
+      background: #ffffff;
+      color: #1f1f1f;
+    }
+
+    .jobs-plain-page .data-table-frame {
+      display: block;
+      width: 100%;
+      margin-top: 10px;
+      overflow: auto;
+      border: 1px solid #e5e5e5;
+      border-radius: 0;
+      background: #ffffff;
+    }
+
+    .jobs-plain-page .jobs-table {
+      display: table;
+      width: 100%;
+      min-width: 1180px;
+      table-layout: auto;
+      border-collapse: collapse;
+      background: #ffffff;
+      color: #1f1f1f;
+      font-size: 12px;
+    }
+
+    .jobs-plain-page .jobs-table th,
+    .jobs-plain-page .jobs-table td {
+      height: auto;
+      min-height: 0;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e5e5;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 1.45;
+      vertical-align: top;
+    }
+
+    .jobs-plain-page .jobs-table th {
+      color: #666666;
+      font-weight: 600;
+      background: #f7f7f7;
+    }
+
+    .jobs-plain-page .table-link {
+      color: #0645ad;
+      text-decoration: underline;
+    }
+
+    .jobs-plain-page .table-pagination {
+      margin-top: 12px;
+      color: #666666;
+      font-size: 12px;
+    }
+
+    .jobs-plain-page .pagination-form,
+    .jobs-plain-page .page-size-form {
+      display: inline-block;
+      margin: 4px 4px 0 0;
+    }
+  </style>
+
+  <section class="section-panel jobs-plain-page">
     <div class="section-heading jobs-heading">
       <div>
         <h2>任务列表</h2>
@@ -89,8 +193,7 @@
                     <a
                       class="table-link"
                       href="/console/jobs/{{ row.job_id | urlencode }}"
-                      data-job-drawer-link
-                      data-drawer-url="/console/jobs/{{ row.job_id | urlencode }}/drawer"
+                      title="打开完整任务详情"
                     >{{ row.job_id }}</a>
                   </td>
                   <td class="mono-cell" title="{{ row.jjdh }}">{{ row.jjdh }}</td>
@@ -214,21 +317,5 @@
       {% endif %}
     {% endif %}
   </section>
-
-  <div class="job-drawer-root" data-job-drawer hidden aria-hidden="true">
-    <button class="job-drawer-backdrop" type="button" data-drawer-close aria-label="关闭任务详情抽屉"></button>
-    <aside class="job-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="job-drawer-title" tabindex="-1">
-      <header class="job-drawer-header">
-        <div>
-          <div class="detail-kicker">postcall_jobs</div>
-          <h2 id="job-drawer-title">任务详情</h2>
-        </div>
-        <button class="drawer-close-button" type="button" data-drawer-close>关闭</button>
-      </header>
-      <div class="job-drawer-content" data-job-drawer-content>
-        <div class="drawer-loading">请选择一条任务查看详情。</div>
-      </div>
-    </aside>
-  </div>
 
 {% endblock %}
