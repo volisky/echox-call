@@ -1,0 +1,26 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: echox-call:cuda
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: echox-call:cuda
+
+  worker:
+    image: echox-call:cuda
+    gpus: all
+    environment:
+      POSTCALL_DEVICE: cuda
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+  llm-worker:
+    image: echox-call:cuda
+
+  console:
+    image: echox-call:cuda

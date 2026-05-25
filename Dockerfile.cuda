@@ -1,0 +1,68 @@
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+    PYTHONPATH=/app/src \
+    ECHOX_CALL_KILL_PORTS=0
+
+WORKDIR /app
+
+ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu126
+ARG PYTORCH_CUDA_TRUSTED_HOST=download.pytorch.org
+ARG TORCH_VERSION=2.8.0
+ARG TORCHAUDIO_VERSION=2.8.0
+
+RUN set -eux; \
+    rm -f /etc/apt/apt.conf.d/docker-clean; \
+    printf '%s\n' \
+        'APT::Update::Post-Invoke "";' \
+        'APT::Update::Post-Invoke-Success "";' \
+        'DPkg::Post-Invoke "";' \
+        > /etc/apt/apt.conf.d/99disable-post-invoke; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+            -e 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+            -e 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+            /etc/apt/sources.list; \
+    fi; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i \
+            -e 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+            -e 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+            -e 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+            /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        ffmpeg \
+        libgomp1 \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+
+# V100 deployment uses NVIDIA Container Toolkit at runtime. CUDA libraries are
+# installed from the PyTorch CUDA wheel index, while the host driver is mounted
+# into the container by Docker's NVIDIA runtime.
+RUN python -m pip install --upgrade pip \
+    && python -m pip install \
+        --index-url "${PYTORCH_CUDA_INDEX_URL}" \
+        --trusted-host "${PYTORCH_CUDA_TRUSTED_HOST}" \
+        "torch==${TORCH_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}" \
+    && sed '/^torch==/d;/^torchaudio==/d' requirements.txt > /tmp/requirements-without-torch.txt \
+    && python -m pip install -r /tmp/requirements-without-torch.txt \
+    && rm -f /tmp/requirements-without-torch.txt
+
+COPY . /app
+
+RUN mkdir -p /app/data/postcall /app/data/console_uploads
+
+EXPOSE 8000 8001
+
+CMD ["python", "-m", "echox_call.cli.api", "--host", "0.0.0.0", "--port", "8000"]
