@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 from echox_call.features.audio_analysis.postcall.llm_worker import (
+    _SYSTEM_PROMPT,
     _build_user_message,
     _extract_analysis_output,
     _normalize_case_type_details,
@@ -25,6 +26,13 @@ class LlmWorkerOutputTest(unittest.TestCase):
         self.assertIn("请只输出一个 JSON 对象", message)
         self.assertIn("caseTypeDetails", message)
         self.assertNotIn("submit_analysis", message)
+
+    def test_system_prompt_prevents_injury_or_fighting_death_inference(self) -> None:
+        self.assertIn("不得根据常识、风险、经验进行联想、延申或补全", _SYSTEM_PROMPT)
+        self.assertIn("受伤", _SYSTEM_PROMPT)
+        self.assertIn("打架", _SYSTEM_PROMPT)
+        self.assertIn("不能推断为“人员死亡”", _SYSTEM_PROMPT)
+        self.assertIn("不得在原因中写“可能死亡”", _SYSTEM_PROMPT)
 
     def test_extracts_submit_analysis_tool_arguments(self) -> None:
         choice = SimpleNamespace(
