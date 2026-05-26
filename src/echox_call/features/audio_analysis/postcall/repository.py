@@ -10,11 +10,19 @@ from pydantic import ValidationError
 from echox_call.core.auth import ApiClient
 from echox_call.core.db import connect
 from echox_call.features.audio_analysis.postcall.attention_rules import AttentionEvaluation
-from echox_call.features.audio_analysis.postcall.llm_repository import PostcallLlmJobRepository
+from echox_call.features.audio_analysis.postcall.llm_repository import (
+    PostcallLlmJobRepository,
+    _build_summary,
+)
 from echox_call.features.audio_analysis.postcall.schemas import (
     CreatePostcallJobRequest,
+    InputSnapshot,
+    OverallResult,
     PostcallJobCreateResult,
     PostcallJobResultData,
+    PostcallReviewSegment,
+    RiskPerson,
+    VoiceResult,
 )
 from echox_call.features.audio_analysis.postcall.worker_models import (
     AudioAssetRecord,
@@ -137,8 +145,14 @@ SELECT
     pj.job_id,
     pj.jjdh,
     pj.state,
+    pj.raw_payload,
+    pj.audio_completed_at,
+    pj.audio_analysis_data,
+    plj.state AS llm_state,
+    plj.llm_output,
     par.api_result_payload
 FROM postcall_jobs AS pj
+LEFT JOIN postcall_llm_jobs AS plj ON plj.postcall_job_id = pj.id
 LEFT JOIN postcall_analysis_results AS par ON par.postcall_job_id = pj.id
 WHERE pj.job_id = %s
   AND pj.client_id = %s
@@ -625,12 +639,16 @@ class PostcallJobRepository:
                     f"stored API result payload is invalid for jobId {job_id}"
                 ) from exc
 
+        partial_result = _build_partial_overall_result(row)
         try:
-            return PostcallJobResultData.model_validate({
+            payload: dict[str, Any] = {
                 "jobId": row["job_id"],
                 "jjdh": row["jjdh"],
                 "state": row["state"],
-            })
+            }
+            if partial_result is not None:
+                payload["overallResult"] = partial_result
+            return PostcallJobResultData.model_validate(payload)
         except ValidationError as exc:
             raise PostcallResultContractError(
                 f"stored postcall result is invalid for jobId {job_id}"
@@ -965,6 +983,120 @@ def _build_audio_analysis_data(
             "debugInfo": attention_evaluation.debug_info,
         },
     }
+
+
+def _build_partial_overall_result(row: Any) -> OverallResult | None:
+    audio_data = row["audio_analysis_data"] if isinstance(row["audio_analysis_data"], dict) else {}
+    llm_out = row["llm_output"] if isinstance(row["llm_output"], dict) else {}
+    raw = row["raw_payload"] if isinstance(row["raw_payload"], dict) else {}
+
+    audio_completed = row["audio_completed_at"] is not None
+    llm_completed = row["llm_state"] == "completed" and bool(llm_out)
+    if not audio_completed and not llm_completed:
+        return None
+
+    voice_result = _build_partial_voice_result(audio_data) if audio_completed else None
+    if voice_result is None and not llm_completed:
+        return None
+
+    risk_person_raw = raw.get("riskPerson")
+    risk_person: RiskPerson | None = None
+    if isinstance(risk_person_raw, dict):
+        try:
+            risk_person = RiskPerson.model_validate(risk_person_raw)
+        except ValidationError:
+            pass
+
+    input_snapshot = InputSnapshot(
+        alarmContent=raw.get("alarmContent"),
+        alarmAddress=raw.get("alarmAddress"),
+        isHighIncidentAddress=raw.get("isHighIncidentAddress"),
+    )
+
+    if llm_completed:
+        return _build_llm_partial_overall_result(
+            llm_out=llm_out,
+            voice_result=voice_result,
+            input_snapshot=input_snapshot,
+            risk_person=risk_person,
+        )
+    if voice_result is None or voice_result.level is None or voice_result.levelName is None:
+        return None
+    return OverallResult(
+        level=voice_result.level,
+        levelName=voice_result.levelName,
+        summary=_build_voice_partial_summary(voice_result),
+        voiceResult=voice_result,
+        inputSnapshot=input_snapshot,
+        riskPerson=risk_person,
+    )
+
+
+def _build_partial_voice_result(audio_data: dict[str, Any]) -> VoiceResult | None:
+    voice_level = audio_data.get("attentionLevel")
+    voice_level_name = audio_data.get("attentionLevelName")
+    if voice_level not in {1, 2, 3} or not isinstance(voice_level_name, str):
+        return None
+
+    raw_review_segments: list[dict[str, Any]] = audio_data.get("reviewSegments") or []
+    review_segments: list[PostcallReviewSegment] | None = None
+    if voice_level in {1, 2} and raw_review_segments:
+        review_segments = [
+            PostcallReviewSegment(
+                startSec=segment["startSec"],
+                endSec=segment["endSec"],
+                result=segment["result"],
+            )
+            for segment in raw_review_segments
+        ]
+
+    return VoiceResult(
+        level=voice_level,
+        levelName=voice_level_name,
+        reviewSegments=review_segments,
+    )
+
+
+def _build_llm_partial_overall_result(
+    *,
+    llm_out: dict[str, Any],
+    voice_result: VoiceResult | None,
+    input_snapshot: InputSnapshot,
+    risk_person: RiskPerson | None,
+) -> OverallResult | None:
+    level = llm_out.get("level")
+    level_name = llm_out.get("levelName")
+    if level not in {1, 2, 3} or not isinstance(level_name, str):
+        return None
+
+    voice_level_name = voice_result.levelName if voice_result is not None else None
+    return OverallResult(
+        level=level,
+        levelName=level_name,
+        summary=_build_summary(llm_out, level_name, voice_level_name),
+        voiceResult=voice_result or VoiceResult(level=None, levelName=None),
+        inputSnapshot=input_snapshot,
+        riskPerson=risk_person,
+    )
+
+
+def _build_voice_partial_summary(voice_result: VoiceResult) -> list[str]:
+    if voice_result.levelName is None:
+        return ["音频识别：暂无音频分析结果。"]
+
+    if voice_result.reviewSegments:
+        segment_results = [
+            segment.result
+            for segment in voice_result.reviewSegments
+            if segment.result
+        ]
+        if segment_results:
+            return [
+                f"音频识别：综合判定为“{voice_result.levelName}”。",
+                *[f"音频片段：{result}" for result in segment_results],
+            ]
+
+    return [f"音频识别：综合判定为“{voice_result.levelName}”。"]
 
 
 def _timeline_payload_from_row(row: Any) -> dict[str, Any]:
