@@ -92,6 +92,38 @@ Content-Type: application/json
 }
 ```
 
+### 1.4 处理中结果返回
+
+音频 worker 和 LLM worker 是两条独立处理链路。查询任务时，如果其中任一部分已经完成，但整体任务还没有最终完成，`GET /api/v1/postcall/jobs/{job_id}` 会继续使用 `data.overallResult` 返回已完成的部分。
+
+客户端只需要通过 `state` 判断 `overallResult` 是否最终结果：
+
+- `state = completed`：`overallResult` 是最终综合结果。
+- `state != completed`：`overallResult` 是当前已完成部分的临时结果，后续可能变化。
+
+示例：
+
+```json
+{
+  "jobId": "job_xxx",
+  "jjdh": "JJD_20260509_0001",
+  "state": "processing_analyzing",
+  "overallResult": {
+    "level": 3,
+    "levelName": "暂无明显线索",
+    "summary": [
+      "分析总结：未发现明确二级以上警情。"
+    ],
+    "voiceResult": {},
+    "inputSnapshot": {
+      "alarmContent": "接警员填写的报警内容",
+      "alarmAddress": "警情地址扩展字段",
+      "isHighIncidentAddress": false
+    }
+  }
+}
+```
+
 ## 2. 健康检查
 
 ### 2.1 接口信息
