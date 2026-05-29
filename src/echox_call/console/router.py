@@ -22,7 +22,7 @@ from echox_call.console.auth import (
     get_console_session_user,
     load_console_auth_config,
 )
-from echox_call.console.jobs import ConsoleJobRepository, JobListFilters
+from echox_call.console.jobs import ConsoleJobRepository, JobListFilters, LEVEL_FILTER_OPTIONS
 from echox_call.console.upload import (
     ConsoleUploadError,
     create_postcall_job_from_upload,
@@ -276,6 +276,8 @@ def console_jobs(request: Request) -> HTMLResponse:
             keyword=None,
             state=None,
             source_system=None,
+            summary_level=None,
+            voice_level=None,
             page=1,
             page_size=20,
         ),
@@ -290,6 +292,8 @@ async def console_jobs_post(request: Request) -> HTMLResponse:
             keyword=None,
             state=None,
             source_system=None,
+            summary_level=None,
+            voice_level=None,
             page=1,
             page_size=_parse_int(_form_value(form, "page_size"), default=20, minimum=10, maximum=100),
         )
@@ -298,6 +302,8 @@ async def console_jobs_post(request: Request) -> HTMLResponse:
             keyword=_clean_query_value(_form_value(form, "q"), max_length=120),
             state=_clean_query_value(_form_value(form, "state"), max_length=64),
             source_system=_clean_query_value(_form_value(form, "source_system"), max_length=128),
+            summary_level=_parse_level_filter(_form_value(form, "summary_level")),
+            voice_level=_parse_level_filter(_form_value(form, "voice_level")),
             page=_parse_int(_form_value(form, "page"), default=1, minimum=1, maximum=100000),
             page_size=_parse_int(_form_value(form, "page_size"), default=20, minimum=10, maximum=100),
         )
@@ -338,6 +344,7 @@ def _render_jobs_page(request: Request, filters: JobListFilters) -> HTMLResponse
             "pagination_items": _pagination_items(page_number, total_pages),
             "state_options": result.state_options if result else [],
             "source_system_options": result.source_system_options if result else [],
+            "level_options": LEVEL_FILTER_OPTIONS,
             "filters": filters,
             "error_message": error_message,
         },
@@ -427,6 +434,11 @@ def _clean_query_value(value: str | None, *, max_length: int | None = None) -> s
     if max_length is not None:
         stripped = stripped[:max_length]
     return stripped or None
+
+
+def _parse_level_filter(value: str | None) -> int | None:
+    level = _parse_int(value, default=0, minimum=0, maximum=3)
+    return level if level in {1, 2, 3} else None
 
 
 def _parse_urlencoded_form(body: bytes) -> dict[str, list[str]]:

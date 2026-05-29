@@ -15,6 +15,92 @@ from echox_call.core.db import connect
 
 JOB_STATES_PENDING = {"processing_queued"}
 JOB_STATES_ACTIVE = {"processing_downloading", "processing_analyzing"}
+LEVEL_FILTER_LABELS = {
+    1: "1 / 需要关注",
+    2: "2 / 建议复核",
+    3: "3 / 暂无明显线索",
+}
+LEVEL_FILTER_OPTIONS = [
+    {"value": level, "label": label}
+    for level, label in LEVEL_FILTER_LABELS.items()
+]
+
+_FINAL_SUMMARY_LEVEL_SQL = """
+COALESCE(
+    result.attention_level,
+    CASE
+        WHEN result.api_result_payload->'overallResult'->>'level' IN ('1', '2', '3')
+            THEN (result.api_result_payload->'overallResult'->>'level')::integer
+        ELSE NULL
+    END,
+    CASE
+        WHEN result.api_result_payload->>'level' IN ('1', '2', '3')
+            THEN (result.api_result_payload->>'level')::integer
+        ELSE NULL
+    END
+)
+"""
+
+_LLM_LEVEL_SQL = """
+CASE
+    WHEN llm.state = 'completed'
+        AND llm.llm_output->>'level' IN ('1', '2', '3')
+        THEN (llm.llm_output->>'level')::integer
+    ELSE NULL
+END
+"""
+
+_VOICE_LEVEL_SQL = """
+COALESCE(
+    CASE
+        WHEN postcall_jobs.audio_analysis_data->>'attentionLevel' IN ('1', '2', '3')
+            THEN (postcall_jobs.audio_analysis_data->>'attentionLevel')::integer
+        ELSE NULL
+    END,
+    CASE
+        WHEN result.api_result_payload->'overallResult'->'voiceResult'->>'level' IN ('1', '2', '3')
+            THEN (result.api_result_payload->'overallResult'->'voiceResult'->>'level')::integer
+        ELSE NULL
+    END
+)
+"""
+
+_PARTIAL_SUMMARY_LEVEL_SQL = f"""
+CASE
+    WHEN {_LLM_LEVEL_SQL} IS NOT NULL AND {_VOICE_LEVEL_SQL} IS NOT NULL
+        THEN LEAST({_LLM_LEVEL_SQL}, {_VOICE_LEVEL_SQL})
+    WHEN {_LLM_LEVEL_SQL} IS NOT NULL
+        THEN {_LLM_LEVEL_SQL}
+    WHEN {_VOICE_LEVEL_SQL} IS NOT NULL
+        THEN {_VOICE_LEVEL_SQL}
+    ELSE NULL
+END
+"""
+
+_SUMMARY_LEVEL_SQL = f"""
+COALESCE(
+    {_FINAL_SUMMARY_LEVEL_SQL},
+    {_PARTIAL_SUMMARY_LEVEL_SQL}
+)
+"""
+
+_SUMMARY_LEVEL_NAME_SQL = f"""
+CASE {_SUMMARY_LEVEL_SQL}
+    WHEN 1 THEN '需要关注'
+    WHEN 2 THEN '建议复核'
+    WHEN 3 THEN '暂无明显线索'
+    ELSE NULL
+END
+"""
+
+_VOICE_LEVEL_NAME_SQL = f"""
+CASE {_VOICE_LEVEL_SQL}
+    WHEN 1 THEN '需要关注'
+    WHEN 2 THEN '建议复核'
+    WHEN 3 THEN '暂无明显线索'
+    ELSE NULL
+END
+"""
 
 
 @dataclass(frozen=True)
@@ -22,8 +108,28 @@ class JobListFilters:
     keyword: str | None
     state: str | None
     source_system: str | None
+    summary_level: int | None
+    voice_level: int | None
     page: int
     page_size: int
+
+    @property
+    def has_filters(self) -> bool:
+        return any((
+            self.keyword,
+            self.state,
+            self.source_system,
+            self.summary_level is not None,
+            self.voice_level is not None,
+        ))
+
+    @property
+    def summary_level_text(self) -> str:
+        return LEVEL_FILTER_LABELS.get(self.summary_level or 0, "")
+
+    @property
+    def voice_level_text(self) -> str:
+        return LEVEL_FILTER_LABELS.get(self.voice_level or 0, "")
 
 
 @dataclass(frozen=True)
@@ -70,36 +176,7 @@ class ConsoleJobRepository:
 
     def list_jobs(self, filters: JobListFilters) -> JobListResult:
         where_sql, params = _build_where(filters)
-        count_sql = f"SELECT count(*) AS count FROM postcall_jobs {where_sql}"
-        select_sql = f"""
-            SELECT
-                job_id,
-                jjdh,
-                state,
-                source_system,
-                bjsj,
-                created_at,
-                updated_at,
-                started_at,
-                completed_at,
-                failed_at,
-                error_code,
-                error_message,
-                duplicate_count,
-                attempt_count,
-                max_attempts,
-                result.attention_level AS analysis_level,
-                result.attention_level_name AS analysis_level_name,
-                COALESCE(
-                    result.api_result_payload->'overallResult'->>'level',
-                    result.api_result_payload->>'level'
-                ) AS api_result_level,
-                COALESCE(
-                    result.api_result_payload->'overallResult'->>'levelName',
-                    result.api_result_payload->>'levelName'
-                ) AS api_result_level_name,
-                jqlbdm,
-                jqlxdm
+        from_sql = """
             FROM postcall_jobs
             LEFT JOIN LATERAL (
                 SELECT
@@ -111,6 +188,35 @@ class ConsoleJobRepository:
                 ORDER BY created_at DESC
                 LIMIT 1
             ) AS result ON TRUE
+            LEFT JOIN postcall_llm_jobs AS llm ON llm.postcall_job_id = postcall_jobs.id
+        """
+        count_sql = f"SELECT count(*) AS count {from_sql} {where_sql}"
+        select_sql = f"""
+            SELECT
+                postcall_jobs.job_id,
+                postcall_jobs.jjdh,
+                postcall_jobs.state,
+                postcall_jobs.source_system,
+                postcall_jobs.bjsj,
+                postcall_jobs.created_at,
+                postcall_jobs.updated_at,
+                postcall_jobs.started_at,
+                postcall_jobs.completed_at,
+                postcall_jobs.failed_at,
+                postcall_jobs.error_code,
+                postcall_jobs.error_message,
+                postcall_jobs.duplicate_count,
+                postcall_jobs.attempt_count,
+                postcall_jobs.max_attempts,
+                result.attention_level AS analysis_level,
+                result.attention_level_name AS analysis_level_name,
+                {_SUMMARY_LEVEL_SQL} AS api_result_level,
+                {_SUMMARY_LEVEL_NAME_SQL} AS api_result_level_name,
+                {_VOICE_LEVEL_SQL} AS voice_result_level,
+                {_VOICE_LEVEL_NAME_SQL} AS voice_result_level_name,
+                postcall_jobs.jqlbdm,
+                postcall_jobs.jqlxdm
+            {from_sql}
             {where_sql}
             ORDER BY postcall_jobs.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
@@ -357,20 +463,28 @@ def _build_where(filters: JobListFilters) -> tuple[str, dict[str, Any]]:
     params: dict[str, Any] = {}
 
     if filters.state:
-        clauses.append("state = %(state)s")
+        clauses.append("postcall_jobs.state = %(state)s")
         params["state"] = filters.state
 
     if filters.source_system:
-        clauses.append("source_system = %(source_system)s")
+        clauses.append("postcall_jobs.source_system = %(source_system)s")
         params["source_system"] = filters.source_system
+
+    if filters.summary_level is not None:
+        clauses.append(f"{_SUMMARY_LEVEL_SQL} = %(summary_level)s")
+        params["summary_level"] = filters.summary_level
+
+    if filters.voice_level is not None:
+        clauses.append(f"{_VOICE_LEVEL_SQL} = %(voice_level)s")
+        params["voice_level"] = filters.voice_level
 
     if filters.keyword:
         clauses.append(
             """
             (
-                jjdh ILIKE %(keyword)s ESCAPE '\\'
-                OR job_id ILIKE %(keyword)s ESCAPE '\\'
-                OR source_system ILIKE %(keyword)s ESCAPE '\\'
+                postcall_jobs.jjdh ILIKE %(keyword)s ESCAPE '\\'
+                OR postcall_jobs.job_id ILIKE %(keyword)s ESCAPE '\\'
+                OR postcall_jobs.source_system ILIKE %(keyword)s ESCAPE '\\'
             )
             """
         )
@@ -435,6 +549,8 @@ def _present_job_row(row: dict[str, Any], *, sequence: int) -> dict[str, Any]:
         else row.get("api_result_level")
     )
     analysis_level_name = row.get("analysis_level_name") or row.get("api_result_level_name")
+    voice_level = row.get("voice_result_level")
+    voice_level_name = row.get("voice_result_level_name")
 
     return row | {
         "sequence": sequence,
@@ -443,6 +559,9 @@ def _present_job_row(row: dict[str, Any], *, sequence: int) -> dict[str, Any]:
         "analysis_result_text": _analysis_result_text(analysis_level, analysis_level_name),
         "analysis_result_key": _analysis_result_key(analysis_level, analysis_level_name),
         "analysis_result_title": _analysis_result_title(analysis_level, analysis_level_name),
+        "voice_result_text": _analysis_result_text(voice_level, voice_level_name),
+        "voice_result_key": _analysis_result_key(voice_level, voice_level_name),
+        "voice_result_title": _analysis_result_title(voice_level, voice_level_name),
         "bjsj_text": _format_datetime(row.get("bjsj")),
         "created_at_text": _format_datetime(created_at),
         "updated_at_text": _format_datetime(row.get("updated_at")),

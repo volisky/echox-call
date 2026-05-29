@@ -396,6 +396,8 @@ class PostcallLlmJobRepository:
             "caseTypeDetails": output.case_type_details,
             "highRiskAddressSummary": output.high_risk_address_summary,
             "highRiskPersonSummary": output.high_risk_person_summary,
+            "secondaryReviewConfidence": output.secondary_review_confidence,
+            "secondaryReviewReason": output.secondary_review_reason,
         }
 
         with connect(autocommit=False) as conn:
@@ -430,12 +432,14 @@ class PostcallLlmJobRepository:
         llm_out: dict[str, Any] = merged["llm_output"] or {}
         raw: dict[str, Any] = merged["raw_payload"] or {}
 
-        overall_level: int = llm_out.get("level", 3)
-        overall_level_name: str = llm_out.get("levelName", ATTENTION_LEVEL_NAMES[3])
-
         voice_level: int | None = audio_data.get("attentionLevel")
         voice_level_name: str | None = audio_data.get("attentionLevelName")
         raw_review_segments: list[dict[str, Any]] = audio_data.get("reviewSegments") or []
+
+        overall_level, overall_level_name = _select_overall_attention_level(
+            llm_out.get("level"),
+            voice_level,
+        )
 
         voice_review_segments: list[PostcallReviewSegment] | None = None
         if voice_level in {1, 2} and raw_review_segments:
@@ -468,7 +472,12 @@ class PostcallLlmJobRepository:
             except ValidationError:
                 pass
 
-        summary = _build_summary(llm_out, overall_level_name, voice_level_name)
+        summary = _build_summary(
+            llm_out,
+            overall_level_name,
+            voice_level_name,
+            voice_level=voice_level,
+        )
 
         overall_result = OverallResult(
             level=overall_level,
@@ -526,20 +535,37 @@ def _build_summary(
     llm_out: dict[str, Any],
     overall_level_name: str,
     voice_level_name: str | None,
+    *,
+    voice_level: Any = None,
 ) -> list[str]:
     detail_items = _case_type_detail_summary_items(llm_out.get("caseTypeDetails"))
+    review_item = _secondary_review_summary_item(llm_out)
     if detail_items:
         analysis_summary = _build_case_type_summary_from_details(
             llm_out.get("caseTypeDetails"),
-            overall_level_name,
+            str(llm_out.get("levelName") or overall_level_name),
+            voice_level=voice_level,
+            voice_level_name=voice_level_name,
         )
+        if (
+            _is_voice_attention_level(voice_level)
+            and voice_level_name
+            and _llm_has_no_case_type_clue(llm_out)
+        ):
+            detail_items = [
+                *detail_items,
+                f"音频识别：综合判定为“{voice_level_name}”。",
+            ]
     else:
-        analysis_summary = _normalize_analysis_summary(
-            llm_out.get("caseTypeSummary"),
-            overall_level_name,
-        )
+        if _is_voice_attention_level(voice_level) and voice_level_name and _llm_has_no_case_type_clue(llm_out):
+            analysis_summary = f"分析总结：文本信息未发现明确二级以上警情，音频识别发现“{voice_level_name}”线索。"
+        else:
+            analysis_summary = _normalize_analysis_summary(
+                llm_out.get("caseTypeSummary"),
+                overall_level_name,
+            )
         detail_items = _legacy_case_type_detail_items(llm_out, voice_level_name)
-    return [analysis_summary, *detail_items]
+    return [analysis_summary, *review_item, *detail_items]
 
 
 def _normalize_analysis_summary(value: Any, overall_level_name: str) -> str:
@@ -567,11 +593,19 @@ def _case_type_detail_summary_items(value: Any) -> list[str]:
     return items
 
 
-def _build_case_type_summary_from_details(value: Any, overall_level_name: str) -> str:
+def _build_case_type_summary_from_details(
+    value: Any,
+    level_name: str,
+    *,
+    voice_level: Any = None,
+    voice_level_name: str | None = None,
+) -> str:
     case_types = _case_type_names(value)
     if not case_types or case_types == ["未命中二级以上警情"]:
+        if _is_voice_attention_level(voice_level) and voice_level_name:
+            return f"分析总结：文本信息未发现明确二级以上警情，音频识别发现“{voice_level_name}”线索。"
         return "分析总结：未发现明确二级以上警情。"
-    if overall_level_name == "建议复核":
+    if level_name == "建议复核":
         return f"分析总结：疑似涉及{'、'.join(case_types)}，建议复核。"
     return f"分析总结：涉及{'、'.join(case_types)}。"
 
@@ -591,6 +625,32 @@ def _case_type_names(value: Any) -> list[str]:
         seen.add(case_type)
         names.append(case_type)
     return names
+
+
+def _llm_has_no_case_type_clue(llm_out: dict[str, Any]) -> bool:
+    level = _normalize_attention_level(llm_out.get("level"))
+    case_types = _case_type_names(llm_out.get("caseTypeDetails"))
+    return level == 3 or not case_types or case_types == ["未命中二级以上警情"]
+
+
+def _is_voice_attention_level(value: Any) -> bool:
+    return _normalize_attention_level(value) in {1, 2}
+
+
+def _secondary_review_summary_item(llm_out: dict[str, Any]) -> list[str]:
+    confidence = llm_out.get("secondaryReviewConfidence")
+    if confidence not in {1, 2, 3, 4, 5}:
+        try:
+            confidence = int(confidence)
+        except (TypeError, ValueError):
+            return []
+    if confidence not in {1, 2, 3, 4, 5}:
+        return []
+
+    reason = _compact_reason(llm_out.get("secondaryReviewReason"))
+    if reason:
+        return [f"二次复核置信度：{confidence}/5，{reason}"]
+    return [f"二次复核置信度：{confidence}/5。"]
 
 
 def _compact_reason(value: Any) -> str:
@@ -634,3 +694,33 @@ def _legacy_case_type_detail_items(
     if not items:
         items.append("未命中二级以上警情：现有信息未出现明确二级及以上警情线索。")
     return items
+
+
+def _select_overall_attention_level(
+    llm_level: Any,
+    voice_level: Any,
+) -> tuple[int, str]:
+    """Return the highest-risk level from LLM and audio results.
+
+    Public levels use 1 as the highest concern and 3 as the lowest concern,
+    so the highest-risk merged level is the smallest valid numeric value.
+    """
+
+    levels = [
+        level
+        for level in (
+            _normalize_attention_level(llm_level),
+            _normalize_attention_level(voice_level),
+        )
+        if level is not None
+    ]
+    level = min(levels) if levels else 3
+    return level, ATTENTION_LEVEL_NAMES[level]
+
+
+def _normalize_attention_level(value: Any) -> int | None:
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        return None
+    return level if level in ATTENTION_LEVEL_NAMES else None

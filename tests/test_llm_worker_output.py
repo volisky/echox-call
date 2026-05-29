@@ -7,6 +7,7 @@ from echox_call.features.audio_analysis.postcall.llm_worker import (
     _SYSTEM_PROMPT,
     _build_user_message,
     _extract_analysis_output,
+    _extract_secondary_review_output,
     _normalize_case_type_details,
 )
 
@@ -124,6 +125,21 @@ class LlmWorkerOutputTest(unittest.TestCase):
                     "reason": "报警内容中提到“手枪”和“子弹”。",
                 }
             ],
+        )
+
+    def test_extracts_secondary_review_confidence(self) -> None:
+        choice = SimpleNamespace(
+            message=SimpleNamespace(
+                content='{"confidence": 3, "reason": "依据包含推断，需要人工复核"}',
+            )
+        )
+
+        self.assertEqual(
+            _extract_secondary_review_output(choice),
+            {
+                "confidence": 3,
+                "reason": "依据包含推断，需要人工复核。",
+            },
         )
 
 

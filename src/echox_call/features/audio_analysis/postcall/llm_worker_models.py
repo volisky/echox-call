@@ -33,4 +33,6 @@ class LlmAnalysisOutput:
     case_type_details: list[dict[str, str]]
     high_risk_address_summary: str | None
     high_risk_person_summary: str | None
+    secondary_review_confidence: int | None
+    secondary_review_reason: str | None
     llm_model: str

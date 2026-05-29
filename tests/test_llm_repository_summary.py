@@ -1,6 +1,9 @@
 import unittest
 
-from echox_call.features.audio_analysis.postcall.llm_repository import _build_summary
+from echox_call.features.audio_analysis.postcall.llm_repository import (
+    _build_summary,
+    _select_overall_attention_level,
+)
 
 
 class LlmRepositorySummaryTests(unittest.TestCase):
@@ -87,6 +90,66 @@ class LlmRepositorySummaryTests(unittest.TestCase):
                 "音频识别：暂无音频分析结果",
             ],
         )
+
+    def test_summary_includes_secondary_review_confidence(self) -> None:
+        summary = _build_summary(
+            {
+                "level": 2,
+                "levelName": "建议复核",
+                "secondaryReviewConfidence": 3,
+                "secondaryReviewReason": "首次依据存在推断，需要人工复核。",
+                "caseTypeDetails": [
+                    {
+                        "caseType": "人员死亡",
+                        "reason": "仅提到倒地和抢救，未明确死亡。",
+                    }
+                ],
+            },
+            "建议复核",
+            None,
+        )
+
+        self.assertEqual(
+            summary,
+            [
+                "分析总结：疑似涉及人员死亡，建议复核。",
+                "二次复核置信度：3/5，首次依据存在推断，需要人工复核。",
+                "人员死亡：仅提到倒地和抢救，未明确死亡。",
+            ],
+        )
+
+    def test_summary_mentions_audio_when_text_has_no_clue_but_audio_is_high_risk(self) -> None:
+        summary = _build_summary(
+            {
+                "level": 3,
+                "levelName": "暂无明显线索",
+                "caseTypeDetails": [
+                    {
+                        "caseType": "未命中二级以上警情",
+                        "reason": "现有信息未出现明确二级及以上警情线索。",
+                    }
+                ],
+            },
+            "需要关注",
+            "需要关注",
+            voice_level=1,
+        )
+
+        self.assertEqual(
+            summary,
+            [
+                "分析总结：文本信息未发现明确二级以上警情，音频识别发现“需要关注”线索。",
+                "未命中二级以上警情：现有信息未出现明确二级及以上警情线索。",
+                "音频识别：综合判定为“需要关注”。",
+            ],
+        )
+
+    def test_overall_attention_level_uses_highest_risk_between_llm_and_audio(self) -> None:
+        self.assertEqual(_select_overall_attention_level(3, 1), (1, "需要关注"))
+        self.assertEqual(_select_overall_attention_level(2, 1), (1, "需要关注"))
+        self.assertEqual(_select_overall_attention_level(1, 2), (1, "需要关注"))
+        self.assertEqual(_select_overall_attention_level(3, 2), (2, "建议复核"))
+        self.assertEqual(_select_overall_attention_level(None, None), (3, "暂无明显线索"))
 
 
 if __name__ == "__main__":

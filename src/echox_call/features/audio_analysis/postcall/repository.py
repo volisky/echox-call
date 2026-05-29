@@ -13,6 +13,7 @@ from echox_call.features.audio_analysis.postcall.attention_rules import Attentio
 from echox_call.features.audio_analysis.postcall.llm_repository import (
     PostcallLlmJobRepository,
     _build_summary,
+    _select_overall_attention_level,
 )
 from echox_call.features.audio_analysis.postcall.schemas import (
     CreatePostcallJobRequest,
@@ -1064,16 +1065,25 @@ def _build_llm_partial_overall_result(
     input_snapshot: InputSnapshot,
     risk_person: RiskPerson | None,
 ) -> OverallResult | None:
-    level = llm_out.get("level")
-    level_name = llm_out.get("levelName")
-    if level not in {1, 2, 3} or not isinstance(level_name, str):
+    llm_level = llm_out.get("level")
+    llm_level_name = llm_out.get("levelName")
+    if llm_level not in {1, 2, 3} or not isinstance(llm_level_name, str):
         return None
 
+    level, level_name = _select_overall_attention_level(
+        llm_level,
+        voice_result.level if voice_result is not None else None,
+    )
     voice_level_name = voice_result.levelName if voice_result is not None else None
     return OverallResult(
         level=level,
         levelName=level_name,
-        summary=_build_summary(llm_out, level_name, voice_level_name),
+        summary=_build_summary(
+            llm_out,
+            level_name,
+            voice_level_name,
+            voice_level=voice_result.level if voice_result is not None else None,
+        ),
         voiceResult=voice_result or VoiceResult(level=None, levelName=None),
         inputSnapshot=input_snapshot,
         riskPerson=risk_person,
