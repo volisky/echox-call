@@ -1,0 +1,130 @@
+x-app-volumes: &app-volumes
+  - ./config:/app/config:ro
+  - ./models:/app/models:ro
+  - ./data:/app/data
+  - ./src:/app/src:ro
+  - ./migrations:/app/migrations:ro
+  - ./docs:/app/docs:ro
+  - ./third_party:/app/third_party:ro
+
+x-app-env: &app-env
+  env_file:
+    - ../../.env.docker
+
+x-gpu-env: &gpu-env
+  POSTCALL_DEVICE: ${POSTCALL_DEVICE:-cuda}
+  NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+  NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+services:
+  postgres:
+    image: postgres:16
+    env_file:
+      - ../../.env.docker
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-echox_call}
+      POSTGRES_USER: ${POSTGRES_USER:-echox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-echox_change_me}
+    ports:
+      - "${POSTGRES_BIND_HOST:-0.0.0.0}:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.db", "migrate"]
+    volumes: *app-volumes
+    profiles:
+      - tools
+
+  api:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.api", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${ECHOX_CALL_HOST:-0.0.0.0}:${ECHOX_CALL_PORT:-8000}:8000"
+    volumes: *app-volumes
+    restart: unless-stopped
+
+  worker:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.worker", "--loop"]
+    gpus: all
+    environment:
+      <<: *gpu-env
+      POSTCALL_WORKER_SKIP_CALL_ID_JOBS: ${POSTCALL_WORKER_SKIP_CALL_ID_JOBS:-1}
+    volumes: *app-volumes
+    restart: unless-stopped
+
+  realtime-worker:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.realtime_worker", "--loop"]
+    gpus: all
+    environment:
+      <<: *gpu-env
+      POSTCALL_ANALYSIS_PROFILE: ${POSTCALL_ANALYSIS_PROFILE:-fast}
+      POSTCALL_REALTIME_STORAGE_DIR: ${POSTCALL_REALTIME_STORAGE_DIR:-/app/data/realtime}
+      POSTCALL_REALTIME_WINDOW_SEC: ${POSTCALL_REALTIME_WINDOW_SEC:-10}
+      POSTCALL_REALTIME_TAIL_MIN_SEC: ${POSTCALL_REALTIME_TAIL_MIN_SEC:-3}
+    volumes: *app-volumes
+    restart: unless-stopped
+
+  llm-worker:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.llm_worker", "--loop"]
+    volumes: *app-volumes
+    restart: unless-stopped
+
+  console:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "echox_call.cli.console", "--host", "0.0.0.0", "--port", "8001"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${ECHOX_CALL_CONSOLE_HOST:-0.0.0.0}:${ECHOX_CALL_CONSOLE_PORT:-8002}:8001"
+    volumes: *app-volumes
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
