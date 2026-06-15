@@ -4,6 +4,10 @@ from types import SimpleNamespace
 import unittest
 
 from echox_call.features.audio_analysis.postcall.llm_worker import (
+    ALLOWED_CASE_TYPES,
+    NO_HIT_CASE_TYPE,
+    _ANALYZE_TOOL,
+    _SECONDARY_REVIEW_PROMPT,
     _SYSTEM_PROMPT,
     _build_user_message,
     _extract_analysis_output,
@@ -29,11 +33,25 @@ class LlmWorkerOutputTest(unittest.TestCase):
         self.assertNotIn("submit_analysis", message)
 
     def test_system_prompt_prevents_injury_or_fighting_death_inference(self) -> None:
-        self.assertIn("不得根据常识、风险、经验进行联想、延申或补全", _SYSTEM_PROMPT)
+        self.assertIn("不能根据常识、风险、经验进行推论、补全或扩大解释", _SYSTEM_PROMPT)
         self.assertIn("受伤", _SYSTEM_PROMPT)
         self.assertIn("打架", _SYSTEM_PROMPT)
-        self.assertIn("不能推断为“人员死亡”", _SYSTEM_PROMPT)
+        self.assertIn("不得因受伤、倒地、躺着", _SYSTEM_PROMPT)
         self.assertIn("不得在原因中写“可能死亡”", _SYSTEM_PROMPT)
+
+    def test_prompt_and_tool_schema_cover_whitelist_case_types(self) -> None:
+        case_type_schema = _ANALYZE_TOOL["function"]["parameters"]["properties"][
+            "caseTypeDetails"
+        ]["items"]["properties"]["caseType"]
+
+        self.assertEqual(case_type_schema["enum"], [*ALLOWED_CASE_TYPES, NO_HIT_CASE_TYPE])
+        for case_type in ALLOWED_CASE_TYPES:
+            self.assertIn(f"- {case_type}", _SYSTEM_PROMPT)
+            self.assertIn(f"- {case_type}", _SECONDARY_REVIEW_PROMPT)
+
+        self.assertIn("逐项扫描白名单", _SYSTEM_PROMPT)
+        self.assertIn("逐项核对首次 caseTypeDetails", _SECONDARY_REVIEW_PROMPT)
+        self.assertIn("最终 confidence 取证据最弱的命中类型", _SECONDARY_REVIEW_PROMPT)
 
     def test_extracts_submit_analysis_tool_arguments(self) -> None:
         choice = SimpleNamespace(
