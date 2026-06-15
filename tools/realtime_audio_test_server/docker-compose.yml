@@ -1,0 +1,18 @@
+services:
+  realtime-audio-test-server:
+    image: ${REALTIME_AUDIO_TEST_IMAGE:-echox-call:stream-cuda}
+    command:
+      - python
+      - /app/server.py
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8022"
+      - --storage-dir
+      - /app/data/realtime-audio-test
+    ports:
+      - "${REALTIME_AUDIO_TEST_HOST:-0.0.0.0}:${REALTIME_AUDIO_TEST_PORT:-8022}:8022"
+    volumes:
+      - ./server.py:/app/server.py:ro
+      - ./data:/app/data
+    restart: unless-stopped
