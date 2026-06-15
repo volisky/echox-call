@@ -59,9 +59,16 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r /tmp/requirements-without-torch.txt \
     && rm -f /tmp/requirements-without-torch.txt
 
-COPY . /app
-
-RUN mkdir -p /app/data/postcall /app/data/console_uploads
+RUN mkdir -p \
+        /app/src \
+        /app/config \
+        /app/data/postcall \
+        /app/data/realtime \
+        /app/data/console_uploads \
+        /app/docs \
+        /app/migrations \
+        /app/models \
+        /app/third_party
 
 EXPOSE 8000 8001
 

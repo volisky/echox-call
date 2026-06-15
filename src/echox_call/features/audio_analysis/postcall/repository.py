@@ -16,6 +16,7 @@ from echox_call.features.audio_analysis.postcall.llm_repository import (
     _select_overall_attention_level,
 )
 from echox_call.features.audio_analysis.postcall.schemas import (
+    ATTENTION_LEVEL_NAMES,
     CreatePostcallJobRequest,
     InputSnapshot,
     OverallResult,
@@ -36,6 +37,7 @@ from echox_call.features.audio_analysis.postcall.worker_models import (
 INSERT_JOB_SQL = """
 INSERT INTO postcall_jobs (
     jjdh,
+    call_id,
     audio_url,
     bjsj,
     jcjxtjsdwmc,
@@ -60,6 +62,7 @@ INSERT INTO postcall_jobs (
 )
 VALUES (
     %(jjdh)s,
+    %(call_id)s,
     %(audio_url)s,
     %(bjsj)s,
     %(jcjxtjsdwmc)s,
@@ -83,12 +86,12 @@ VALUES (
     %(source_system)s
 )
 ON CONFLICT (jjdh) DO NOTHING
-RETURNING id, job_id, jjdh, state, audio_url, duplicate_count
+RETURNING id, job_id, jjdh, call_id, state, audio_url, duplicate_count
 """
 
 
 SELECT_JOB_FOR_UPDATE_SQL = """
-SELECT id, job_id, jjdh, state, audio_url, duplicate_count
+SELECT id, job_id, jjdh, call_id, state, audio_url, duplicate_count
 FROM postcall_jobs
 WHERE jjdh = %s
 FOR UPDATE
@@ -98,6 +101,7 @@ FOR UPDATE
 REQUEUE_DUPLICATE_JOB_SQL = """
 UPDATE postcall_jobs
 SET
+    call_id = %(call_id)s,
     audio_url = %(audio_url)s,
     bjsj = %(bjsj)s,
     jcjxtjsdwmc = %(jcjxtjsdwmc)s,
@@ -136,7 +140,7 @@ SET
     error_message = NULL,
     updated_at = now()
 WHERE id = %(job_internal_id)s
-RETURNING id, job_id, jjdh, state, audio_url, duplicate_count
+RETURNING id, job_id, jjdh, call_id, state, audio_url, duplicate_count
 """
 
 
@@ -145,6 +149,7 @@ SELECT
     pj.id,
     pj.job_id,
     pj.jjdh,
+    pj.call_id,
     pj.state,
     pj.raw_payload,
     pj.audio_completed_at,
@@ -211,6 +216,7 @@ WITH candidate AS (
       AND next_run_at <= now()
       AND attempt_count < max_attempts
       AND (locked_until IS NULL OR locked_until < now())
+      AND (%(skip_call_id_jobs)s = false OR call_id IS NULL)
     ORDER BY priority DESC, next_run_at ASC, created_at ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -535,6 +541,24 @@ RETURNING id
 """
 
 
+SELECT_JOB_BY_CALL_ID_SQL = """
+SELECT
+    id,
+    job_id,
+    jjdh,
+    audio_url,
+    bjsj,
+    callback_url,
+    attempt_count,
+    max_attempts,
+    duplicate_count
+FROM postcall_jobs
+WHERE call_id = %s
+ORDER BY created_at DESC
+LIMIT 1
+"""
+
+
 class PostcallJobRepositoryError(RuntimeError):
     """Raised when a postcall job cannot be persisted."""
 
@@ -576,6 +600,7 @@ class PostcallJobRepository:
                     return PostcallJobCreateResult(
                         job_id=inserted["job_id"],
                         jjdh=inserted["jjdh"],
+                        call_id=inserted["call_id"],
                         state=inserted["state"],
                         duplicate=False,
                         duplicate_count=inserted["duplicate_count"],
@@ -601,6 +626,7 @@ class PostcallJobRepository:
                 return PostcallJobCreateResult(
                     job_id=updated["job_id"],
                     jjdh=updated["jjdh"],
+                    call_id=updated["call_id"],
                     state=updated["state"],
                     duplicate=True,
                     duplicate_count=updated["duplicate_count"],
@@ -620,13 +646,15 @@ class PostcallJobRepository:
             raise PostcallJobNotFoundError("postcall job not found")
 
         if row["state"] == "completed" and isinstance(row["api_result_payload"], dict):
-            payload = row["api_result_payload"]
+            payload = dict(row["api_result_payload"])
+            payload.setdefault("callId", row["call_id"])
             if "level" in payload and "overallResult" not in payload:
                 # Pre-migration legacy row; return completed state without overallResult.
                 try:
                     return PostcallJobResultData.model_validate({
                         "jobId": payload.get("jobId") or row["job_id"],
                         "jjdh": payload.get("jjdh") or row["jjdh"],
+                        "callId": payload.get("callId") or row["call_id"],
                         "state": "completed",
                     })
                 except ValidationError as exc:
@@ -645,6 +673,7 @@ class PostcallJobRepository:
             payload: dict[str, Any] = {
                 "jobId": row["job_id"],
                 "jjdh": row["jjdh"],
+                "callId": row["call_id"],
                 "state": row["state"],
             }
             if partial_result is not None:
@@ -748,6 +777,7 @@ class PostcallJobRepository:
         *,
         worker_id: str,
         lock_seconds: int,
+        skip_call_id_jobs: bool = False,
     ) -> ClaimedPostcallJob | None:
         with connect(autocommit=False) as conn:
             with conn.transaction():
@@ -756,6 +786,7 @@ class PostcallJobRepository:
                     {
                         "worker_id": worker_id,
                         "lock_seconds": lock_seconds,
+                        "skip_call_id_jobs": skip_call_id_jobs,
                     },
                 ).fetchone()
         if row is None:
@@ -844,6 +875,23 @@ class PostcallJobRepository:
             error_message=error_message,
             retryable=False,
             retry_delay_seconds=0,
+        )
+
+    def get_claimed_job_by_call_id(self, call_id: str) -> ClaimedPostcallJob | None:
+        with connect() as conn:
+            row = conn.execute(SELECT_JOB_BY_CALL_ID_SQL, (call_id,)).fetchone()
+        if row is None:
+            return None
+        return ClaimedPostcallJob(
+            internal_id=row["id"],
+            job_id=row["job_id"],
+            jjdh=row["jjdh"],
+            audio_url=row["audio_url"],
+            bjsj=row["bjsj"],
+            callback_url=row["callback_url"],
+            attempt_count=row["attempt_count"],
+            max_attempts=row["max_attempts"],
+            duplicate_count=row["duplicate_count"],
         )
 
     def insert_audio_asset(
@@ -993,10 +1041,14 @@ def _build_partial_overall_result(row: Any) -> OverallResult | None:
 
     audio_completed = row["audio_completed_at"] is not None
     llm_completed = row["llm_state"] == "completed" and bool(llm_out)
+    realtime_voice_result = None
+    if not audio_completed and row.get("call_id"):
+        realtime_voice_result = _build_realtime_voice_result(row["call_id"])
     if not audio_completed and not llm_completed:
-        return None
+        if realtime_voice_result is None:
+            return None
 
-    voice_result = _build_partial_voice_result(audio_data) if audio_completed else None
+    voice_result = _build_partial_voice_result(audio_data) if audio_completed else realtime_voice_result
     if voice_result is None and not llm_completed:
         return None
 
@@ -1109,6 +1161,61 @@ def _build_voice_partial_summary(voice_result: VoiceResult) -> list[str]:
     return [f"音频识别：综合判定为“{voice_result.levelName}”。"]
 
 
+def _build_realtime_voice_result(call_id: str) -> VoiceResult | None:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                window_index,
+                start_sec,
+                end_sec,
+                attention_level,
+                attention_level_name,
+                review_segments
+            FROM postcall_realtime_windows AS win
+            JOIN postcall_realtime_streams AS stream ON stream.id = win.stream_id
+            WHERE stream.call_id = %s
+              AND win.state = 'completed'
+              AND win.attention_level IS NOT NULL
+            ORDER BY win.start_sec ASC, win.end_sec ASC
+            """,
+            (call_id,),
+        ).fetchall()
+    if not rows:
+        return None
+
+    levels = [row["attention_level"] for row in rows if row["attention_level"] in {1, 2, 3}]
+    if not levels:
+        return None
+    level = min(levels)
+    level_name = ATTENTION_LEVEL_NAMES[level]
+    review_segments: list[PostcallReviewSegment] | None = None
+    if level in {1, 2}:
+        raw_segments: list[dict[str, Any]] = []
+        for row in rows:
+            if row["attention_level"] not in {1, 2}:
+                continue
+            window_segments = row["review_segments"] if isinstance(row["review_segments"], list) else []
+            for segment in window_segments:
+                if isinstance(segment, dict):
+                    raw_segments.append(segment)
+        review_segments = [
+            PostcallReviewSegment(
+                startSec=float(segment["startSec"]),
+                endSec=float(segment["endSec"]),
+                result=segment.get("result") or segment.get("title") or "实时音频窗口命中关注线索",
+            )
+            for segment in raw_segments
+            if "startSec" in segment and "endSec" in segment
+        ] or None
+
+    return VoiceResult(
+        level=level,
+        levelName=level_name,
+        reviewSegments=review_segments,
+    )
+
+
 def _timeline_payload_from_row(row: Any) -> dict[str, Any]:
     return {
         "segmentId": row["segment_id"],
@@ -1212,6 +1319,7 @@ def _build_insert_params(
 ) -> dict[str, Any]:
     return {
         "jjdh": request.jjdh,
+        "call_id": request.callId,
         "audio_url": request.audioUrl,
         "bjsj": request.bjsj,
         "jcjxtjsdwmc": request.JCJXTJSDWMC,

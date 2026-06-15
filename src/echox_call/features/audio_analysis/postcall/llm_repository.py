@@ -197,6 +197,7 @@ WITH locked AS (
         pj.id,
         pj.job_id,
         pj.jjdh,
+        pj.call_id,
         pj.duplicate_count,
         pj.audio_analysis_data,
         pj.raw_payload,
@@ -226,6 +227,7 @@ RETURNING
     pj.id,
     locked.job_id,
     locked.jjdh,
+    locked.call_id,
     locked.duplicate_count,
     locked.audio_analysis_data,
     locked.raw_payload,
@@ -491,6 +493,7 @@ class PostcallLlmJobRepository:
         api_result = PostcallJobResultData(
             jobId=merged["job_id"],
             jjdh=merged["jjdh"],
+            callId=merged["call_id"],
             state="completed",
             overallResult=overall_result,
         )

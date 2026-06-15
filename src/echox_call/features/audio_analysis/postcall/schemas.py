@@ -116,6 +116,7 @@ class CreatePostcallJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     jjdh: str
+    callId: str | None = None
     audioUrl: str
     bjsj: datetime
     JCJXTJSDWMC: str
@@ -158,7 +159,7 @@ class CreatePostcallJobRequest(BaseModel):
     def validate_required_text(cls, value: str, info: Any) -> str:
         return _strip_non_blank(value, info.field_name)
 
-    @field_validator("jqxldm", "jqzldm", "callbackUrl", "alarmContent", "alarmAddress")
+    @field_validator("callId", "jqxldm", "jqzldm", "callbackUrl", "alarmContent", "alarmAddress")
     @classmethod
     def validate_optional_text(cls, value: str | None, info: Any) -> str | None:
         return _strip_optional_non_blank(value, info.field_name)
@@ -191,6 +192,7 @@ class CreatePostcallJobRequest(BaseModel):
 class PostcallJobCreateResult:
     job_id: str
     jjdh: str
+    call_id: str | None
     state: PostcallJobState
     duplicate: bool
     duplicate_count: int
@@ -199,6 +201,7 @@ class PostcallJobCreateResult:
 class CreatePostcallJobData(BaseModel):
     jobId: str
     jjdh: str
+    callId: str | None = None
     state: PostcallJobState
     duplicate: bool
 
@@ -456,6 +459,7 @@ class PostcallJobResultData(BaseModel):
 
     jobId: str
     jjdh: str
+    callId: str | None = None
     state: PostcallJobState
     overallResult: OverallResult | None = None
 

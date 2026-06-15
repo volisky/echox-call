@@ -52,6 +52,7 @@ def create_postcall_job(
     data = CreatePostcallJobData(
         jobId=result.job_id,
         jjdh=result.jjdh,
+        callId=result.call_id,
         state=result.state,
         duplicate=result.duplicate,
     )

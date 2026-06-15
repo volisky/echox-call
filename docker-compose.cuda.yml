@@ -3,24 +3,75 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cuda
-    image: echox-call:cuda
+    image: echox-call:stream-cuda
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
 
   api:
     build:
       context: .
       dockerfile: Dockerfile.cuda
-    image: echox-call:cuda
+    image: echox-call:stream-cuda
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
 
   worker:
-    image: echox-call:cuda
+    image: echox-call:stream-cuda
     gpus: all
     environment:
       POSTCALL_DEVICE: cuda
+      POSTCALL_WORKER_SKIP_CALL_ID_JOBS: "1"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
+
+  realtime-worker:
+    image: echox-call:stream-cuda
+    env_file:
+      - path: .env.docker.example
+      - path: .env.docker
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "-m", "echox_call.cli.realtime_worker", "--loop"]
+    gpus: all
+    environment:
+      POSTCALL_DEVICE: cuda
+      POSTCALL_ANALYSIS_PROFILE: fast
+      POSTCALL_REALTIME_STORAGE_DIR: /app/data/realtime
+      POSTCALL_REALTIME_WINDOW_SEC: "10"
+      POSTCALL_REALTIME_TAIL_MIN_SEC: "3"
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
+    restart: unless-stopped
 
   llm-worker:
-    image: echox-call:cuda
+    image: echox-call:stream-cuda
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
 
   console:
-    image: echox-call:cuda
+    image: echox-call:stream-cuda
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./docs:/app/docs
+      - ./third_party:/app/third_party
