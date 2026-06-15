@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile.cuda
     image: echox-call:stream-cuda
     volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
       - ./src:/app/src
       - ./migrations:/app/migrations
       - ./docs:/app/docs
@@ -54,6 +57,9 @@ services:
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
       - ./src:/app/src
       - ./migrations:/app/migrations
       - ./docs:/app/docs

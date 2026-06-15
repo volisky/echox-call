@@ -689,7 +689,10 @@ class RealtimeAudioWorker:
                 emotion_types_zh=_emotion_types_zh(timeline),
             )
             return
-        segments = [_segment_from_timeline(item) for item in timeline]
+        segments = [
+            _segment_from_timeline(item, index=index)
+            for index, item in enumerate(timeline, start=1)
+        ]
         self.postcall_repository.persist_success(
             job=job,
             segments=segments,
@@ -740,9 +743,10 @@ def _shift_segment(segment: TimelineSegmentRecord, offset_sec: float) -> Timelin
     )
 
 
-def _segment_from_timeline(item: dict[str, Any]) -> TimelineSegmentRecord:
+def _segment_from_timeline(item: dict[str, Any], *, index: int) -> TimelineSegmentRecord:
+    raw_segment_id = str(item.get("segmentId") or "").strip()
     return TimelineSegmentRecord(
-        segment_id=str(item["segmentId"]),
+        segment_id=raw_segment_id or f"realtime_segment_{index:04d}",
         start_sec=float(item["startSec"]),
         end_sec=float(item["endSec"]),
         speaker_label=item.get("speakerLabel"),
