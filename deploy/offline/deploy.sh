@@ -20,6 +20,9 @@ Options:
 
 Environment:
   START_LLM_WORKER=1  Start llm-worker after migration. Default: 0.
+  POSTGRES_PASSWORD   Password written to .env.docker. Default: LZdx@2025.
+  POSTGRES_PASSWORD_URL_ENCODED
+                      URL-encoded password for DATABASE_URL. Default: LZdx%402025.
 EOF
 }
 
@@ -66,16 +69,9 @@ compose_cmd() {
   fi
 }
 
-random_password() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24
-  else
-    date +%s%N | sha256sum | head -c 24
-  fi
-}
-
 write_default_env() {
   local password="$1"
+  local password_url_encoded="$2"
   cat > .env.docker <<EOF
 POSTGRES_DB=echox_call
 POSTGRES_ADMIN_DB=postgres
@@ -85,7 +81,7 @@ POSTGRES_BIND_HOST=0.0.0.0
 POSTGRES_HOST_PORT=5432
 POSTGRES_USER=echox
 POSTGRES_PASSWORD=${password}
-DATABASE_URL=postgresql://echox:${password}@postgres:5432/echox_call
+DATABASE_URL=postgresql://echox:${password_url_encoded}@postgres:5432/echox_call
 
 ECHOX_CALL_HOST=0.0.0.0
 ECHOX_CALL_PORT=8000
@@ -159,7 +155,7 @@ cd "$INSTALL_DIR"
 mkdir -p data/postcall data/realtime data/console_uploads data/logs
 
 if [[ "$FORCE_ENV" -eq 1 || ! -f .env.docker ]]; then
-  write_default_env "$(random_password)"
+  write_default_env "${POSTGRES_PASSWORD:-LZdx@2025}" "${POSTGRES_PASSWORD_URL_ENCODED:-LZdx%402025}"
   echo "created .env.docker"
 else
   echo "kept existing .env.docker"

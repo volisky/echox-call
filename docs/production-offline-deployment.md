@@ -101,12 +101,23 @@ ECHOX_CALL_CONSOLE_PORT=8002
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 POSTGRES_HOST_PORT=5432
+POSTGRES_USER=echox
+POSTGRES_PASSWORD=LZdx@2025
+DATABASE_URL=postgresql://echox:LZdx%402025@postgres:5432/echox_call
 POSTCALL_DEVICE=cuda
 POSTCALL_ANALYSIS_PROFILE=fast
 POSTCALL_WORKER_SKIP_CALL_ID_JOBS=1
 POSTCALL_REALTIME_WINDOW_SEC=10
 POSTCALL_REALTIME_TAIL_MIN_SEC=3
 NVIDIA_VISIBLE_DEVICES=all
+```
+
+`POSTGRES_PASSWORD` 默认固定为 `LZdx@2025`。因为密码包含 `@`，所以 `DATABASE_URL` 中需要写成 URL 编码形式 `LZdx%402025`。
+
+如果安装目录里已经存在 `.env.docker`，部署脚本默认会保留已有配置，不会覆盖 PG 密码。需要强制重新生成时再使用：
+
+```bash
+sudo ./deploy.sh --install-dir /data/zhuxx/echox-call --force-env
 ```
 
 `POSTCALL_WORKER_SKIP_CALL_ID_JOBS=1` 表示带 `callId` 的实时音频任务由 `realtime-worker` 处理，普通 `worker` 不再重复下载占位 `audioUrl`。
