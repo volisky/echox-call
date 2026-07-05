@@ -216,7 +216,35 @@ WITH candidate AS (
       AND next_run_at <= now()
       AND attempt_count < max_attempts
       AND (locked_until IS NULL OR locked_until < now())
-      AND (%(skip_call_id_jobs)s = false OR call_id IS NULL)
+      AND (
+          %(skip_call_id_jobs)s = false
+          OR call_id IS NULL
+          OR (
+              created_at <= now() - make_interval(secs => %(call_id_fallback_after_seconds)s)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM postcall_realtime_streams AS stream
+                  WHERE stream.call_id = postcall_jobs.call_id
+              )
+          )
+          OR EXISTS (
+              SELECT 1
+              FROM postcall_realtime_streams AS stream
+              WHERE stream.call_id = postcall_jobs.call_id
+                AND (
+                    stream.state = 'failed'
+                    OR (
+                        stream.state = 'finalized'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM postcall_realtime_windows AS win
+                            WHERE win.stream_id = stream.id
+                              AND win.state = 'completed'
+                        )
+                    )
+                )
+          )
+      )
     ORDER BY priority DESC, next_run_at ASC, created_at ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -778,6 +806,7 @@ class PostcallJobRepository:
         worker_id: str,
         lock_seconds: int,
         skip_call_id_jobs: bool = False,
+        call_id_fallback_after_seconds: int = 300,
     ) -> ClaimedPostcallJob | None:
         with connect(autocommit=False) as conn:
             with conn.transaction():
@@ -787,6 +816,7 @@ class PostcallJobRepository:
                         "worker_id": worker_id,
                         "lock_seconds": lock_seconds,
                         "skip_call_id_jobs": skip_call_id_jobs,
+                        "call_id_fallback_after_seconds": call_id_fallback_after_seconds,
                     },
                 ).fetchone()
         if row is None:

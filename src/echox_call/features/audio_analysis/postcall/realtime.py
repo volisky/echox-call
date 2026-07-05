@@ -39,6 +39,9 @@ class RealtimeAudioError(RuntimeError):
     """Raised when realtime stream ingestion or analysis fails."""
 
 
+PCM16LE_SAMPLE_RATE = 8000
+
+
 @dataclass(frozen=True)
 class VendorParams:
     raw: str
@@ -87,8 +90,11 @@ class RealtimeWindowClaim:
 
 def parse_vendor_specific_param(value: str | None) -> VendorParams:
     raw = value or ""
+    normalized = raw.strip()
+    if normalized.startswith("{") and normalized.endswith("}"):
+        normalized = normalized[1:-1]
     parsed: dict[str, str] = {}
-    for item in raw.split(";"):
+    for item in normalized.replace(",", ";").split(";"):
         item = item.strip()
         if not item or "=" not in item:
             continue
@@ -129,17 +135,38 @@ def save_upload_chunk(
     storage_dir: Path,
     call_id: str,
     seq: int,
+    voice_format: int,
     source: BinaryIO,
 ) -> tuple[Path, int, str, ChunkAudioInfo]:
     chunk_dir = storage_dir / _safe_id(call_id) / "chunks"
     chunk_dir.mkdir(parents=True, exist_ok=True)
     path = chunk_dir / f"{seq:08d}.wav"
-    with path.open("wb") as output:
-        shutil.copyfileobj(source, output)
+    if path.exists() and path.stat().st_size > 0:
+        existing_info = inspect_wav(path)
+        if existing_info.duration_sec is not None:
+            return path, path.stat().st_size, _sha256_file(path), existing_info
+
+    if voice_format == 1:
+        _write_pcm16le_as_wav(source, path)
+    else:
+        with path.open("wb") as output:
+            shutil.copyfileobj(source, output)
     size_bytes = path.stat().st_size
     if size_bytes <= 0:
         raise RealtimeAudioError("uploaded audio chunk is empty")
     return path, size_bytes, _sha256_file(path), inspect_wav(path)
+
+
+def _write_pcm16le_as_wav(source: BinaryIO, path: Path) -> None:
+    data = source.read()
+    if not data:
+        raise RealtimeAudioError("uploaded audio chunk is empty")
+    if len(data) % 2 != 0:
+        data += b"\x00"
+    samples = np.frombuffer(data, dtype="<i2")
+    if samples.size == 0:
+        raise RealtimeAudioError("uploaded PCM audio chunk has no samples")
+    sf.write(path, samples, PCM16LE_SAMPLE_RATE, subtype="PCM_16")
 
 
 class RealtimeAudioRepository:
@@ -523,6 +550,64 @@ class RealtimeAudioRepository:
             ).fetchall()
         return [row["call_id"] for row in rows]
 
+    def close_idle_streams(self, *, limit: int) -> int:
+        idle_end_seconds = self.settings.idle_end_seconds
+        if idle_end_seconds <= 0:
+            return 0
+        with connect(autocommit=False) as conn:
+            with conn.transaction():
+                rows = conn.execute(
+                    """
+                    WITH candidate AS (
+                        SELECT id, call_id, received_duration_sec
+                        FROM postcall_realtime_streams
+                        WHERE state IN ('receiving', 'alerting')
+                          AND ended_at IS NULL
+                          AND updated_at <= now() - make_interval(secs => %s)
+                        ORDER BY updated_at ASC
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT %s
+                    )
+                    UPDATE postcall_realtime_streams AS stream
+                    SET
+                        state = 'failed',
+                        ended_at = COALESCE(stream.ended_at, now()),
+                        error_code = CASE
+                            WHEN candidate.received_duration_sec < %s THEN 'REALTIME_IDLE_TOO_SHORT'
+                            ELSE 'REALTIME_MISSING_END'
+                        END,
+                        error_message = CASE
+                            WHEN candidate.received_duration_sec < %s THEN
+                                'stream idle timed out before minimum duration: callId='
+                                || candidate.call_id
+                                || ' receivedDurationSec='
+                                || candidate.received_duration_sec::text
+                                || ' minDurationSec='
+                                || %s::text
+                            ELSE
+                                'stream idle timed out without end flag; falling back to non-realtime audio analysis: callId='
+                                || candidate.call_id
+                                || ' receivedDurationSec='
+                                || candidate.received_duration_sec::text
+                                || ' idleEndSeconds='
+                                || %s::text
+                        END,
+                        updated_at = now()
+                    FROM candidate
+                    WHERE stream.id = candidate.id
+                    RETURNING stream.call_id
+                    """,
+                    (
+                        idle_end_seconds,
+                        limit,
+                        self.settings.min_duration_sec,
+                        self.settings.min_duration_sec,
+                        self.settings.min_duration_sec,
+                        idle_end_seconds,
+                    ),
+                ).fetchall()
+        return len(rows)
+
     def mark_stream_finalized(
         self,
         *,
@@ -607,7 +692,7 @@ class RealtimeAudioWorker:
 
     def run_once(self, *, batch_size: int | None = None) -> int:
         limit = batch_size or self.realtime_settings.batch_size
-        processed = 0
+        processed = self.repository.close_idle_streams(limit=max(1, limit))
         for _ in range(limit):
             claim = self.repository.claim_next_window()
             if claim is None:

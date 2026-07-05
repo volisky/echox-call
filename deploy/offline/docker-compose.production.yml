@@ -1,11 +1,11 @@
 x-app-volumes: &app-volumes
-  - ./config:/app/config:ro
-  - ./models:/app/models:ro
-  - ./data:/app/data
-  - ./src:/app/src:ro
-  - ./migrations:/app/migrations:ro
-  - ./docs:/app/docs:ro
-  - ./third_party:/app/third_party:ro
+  - ../../config:/app/config:ro
+  - ../../models:/app/models:ro
+  - ../../data:/app/data
+  - ../../src:/app/src:ro
+  - ../../migrations:/app/migrations:ro
+  - ../../docs:/app/docs:ro
+  - ../../third_party:/app/third_party:ro
 
 x-app-env: &app-env
   env_file:
@@ -65,6 +65,20 @@ services:
       retries: 12
     ports:
       - "${ECHOX_CALL_HOST:-0.0.0.0}:${ECHOX_CALL_PORT:-8000}:8000"
+    volumes: *app-volumes
+    restart: unless-stopped
+
+  opinion-risk-api:
+    image: echox-call:stream-cuda
+    <<: *app-env
+    command: ["python", "-m", "echox_call.cli.opinion_risk", "--host", "0.0.0.0", "--port", "8010"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8010/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    ports:
+      - "${OPINION_RISK_HOST:-0.0.0.0}:${OPINION_RISK_PORT:-8010}:8010"
     volumes: *app-volumes
     restart: unless-stopped
 

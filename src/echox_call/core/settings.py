@@ -77,6 +77,7 @@ class PostcallWorkerSettings:
     wavlm_labels_path: Path
     attention_rules_path: Path
     skip_call_id_jobs: bool
+    call_id_fallback_after_seconds: int
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,8 @@ class RealtimeWorkerSettings:
     storage_dir: Path
     window_sec: int
     tail_min_sec: int
+    idle_end_seconds: int
+    min_duration_sec: int
     batch_size: int
     sleep_seconds: float
 
@@ -293,6 +296,11 @@ def load_postcall_worker_settings(
             "config/postcall_attention_rules.yaml",
         ),
         skip_call_id_jobs=_env_bool(source, "POSTCALL_WORKER_SKIP_CALL_ID_JOBS", False),
+        call_id_fallback_after_seconds=_env_int(
+            source,
+            "POSTCALL_WORKER_CALL_ID_FALLBACK_AFTER_SECONDS",
+            300,
+        ),
     )
 
 
@@ -342,10 +350,18 @@ def load_realtime_worker_settings(
             "POSTCALL_REALTIME_TAIL_MIN_SEC must be less than or equal to "
             "POSTCALL_REALTIME_WINDOW_SEC"
         )
+    idle_end_seconds = _env_int(source, "POSTCALL_REALTIME_IDLE_END_SECONDS", 60)
+    min_duration_sec = _env_int(source, "POSTCALL_REALTIME_MIN_DURATION_SEC", tail_min_sec)
+    if idle_end_seconds < 0:
+        raise RealtimeWorkerConfigError("POSTCALL_REALTIME_IDLE_END_SECONDS must be >= 0")
+    if min_duration_sec < 0:
+        raise RealtimeWorkerConfigError("POSTCALL_REALTIME_MIN_DURATION_SEC must be >= 0")
     return RealtimeWorkerSettings(
         storage_dir=_env_path(source, "POSTCALL_REALTIME_STORAGE_DIR", "data/realtime"),
         window_sec=window_sec,
         tail_min_sec=tail_min_sec,
+        idle_end_seconds=idle_end_seconds,
+        min_duration_sec=min_duration_sec,
         batch_size=_env_int(source, "POSTCALL_REALTIME_WORKER_BATCH_SIZE", 1),
         sleep_seconds=float(source.get("POSTCALL_REALTIME_WORKER_SLEEP_SECONDS", "2.0") or "2.0"),
     )

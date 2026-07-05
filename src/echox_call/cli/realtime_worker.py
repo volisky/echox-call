@@ -50,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
             "realtime-worker started: "
             f"windowSec={worker.realtime_settings.window_sec} "
             f"tailMinSec={worker.realtime_settings.tail_min_sec} "
+            f"idleEndSeconds={worker.realtime_settings.idle_end_seconds} "
+            f"minDurationSec={worker.realtime_settings.min_duration_sec} "
             f"sleepSeconds={sleep_seconds}",
             flush=True,
         )
