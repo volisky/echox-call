@@ -764,8 +764,18 @@ class RealtimeAudioWorker:
         model_runs: list[ModelRunRecord],
     ) -> None:
         timeline = self.repository.load_completed_timeline(call_id)
-        attention_evaluation = self.postcall_worker.attention_rules.evaluate(timeline)
         job = self.postcall_repository.get_claimed_job_by_call_id(call_id)
+        attention_rule_profile = "default"
+        if job is None:
+            attention_evaluation = self.postcall_worker.attention_rules.evaluate(timeline)
+        else:
+            (
+                attention_evaluation,
+                attention_rule_profile,
+            ) = self.postcall_worker.evaluate_attention_for_job(
+                job=job,
+                timeline=timeline,
+            )
         if job is None:
             self.repository.mark_stream_finalized(
                 call_id=call_id,
@@ -794,6 +804,7 @@ class RealtimeAudioWorker:
                 "tailMinSec": self.realtime_settings.tail_min_sec,
                 "timelineSegmentCount": len(segments),
                 "attentionRuleVersion": attention_evaluation.rule_version,
+                "attentionRuleProfile": attention_rule_profile,
                 "level": attention_evaluation.level,
                 "levelName": attention_evaluation.level_name,
                 "matchedRuleCodes": attention_evaluation.matched_rule_codes,

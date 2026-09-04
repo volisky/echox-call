@@ -77,6 +77,8 @@ services:
   console:
     image: echox-call:stream-cuda
     volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
       - ./src:/app/src
       - ./migrations:/app/migrations
       - ./docs:/app/docs

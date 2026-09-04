@@ -1,4 +1,4 @@
-version: postcall_attention_rules_v9
+version: postcall_attention_rules_v6
 mergeGapSec: 5.0
 nearWindowSec: 15.0
 
@@ -114,28 +114,28 @@ insightTypes:
     insightName: 语音紧张或高唤醒线索
     sourceField: voiceEmotionDimensions
     dimensionKey: arousal
-    scoreGte: 0.40
+    scoreGte: 0.68
 
   voice_fear:
     insightName: 疑似恐惧语音线索
     sourceField: voiceEmotionScores
     labels:
       - Fear
-    scoreGte: 0.40
+    scoreGte: 0.55
 
   voice_anger:
     insightName: 疑似愤怒语音线索
     sourceField: voiceEmotionScores
     labels:
       - Anger
-    scoreGte: 0.40
+    scoreGte: 0.55
 
   voice_sadness:
     insightName: 疑似悲伤语音线索
     sourceField: voiceEmotionScores
     labels:
       - Sadness
-    scoreGte: 0.40
+    scoreGte: 0.55
 
   voice_neutral:
     insightName: 语音平稳线索
@@ -148,7 +148,7 @@ insightTypes:
     insightName: 语音负向情绪线索
     sourceField: voiceEmotionDimensions
     dimensionKey: valence
-    scoreLte: 0.40
+    scoreLte: 0.35
 
   voice_low_dominance:
     insightName: 语音控制感偏低线索
@@ -393,27 +393,6 @@ compositeInsights:
     conclusion: no_obvious_clue
     reasonTemplate: "{startSec}s-{endSec}s 人声状态存在异常线索，但背景声音事件支持不足，当前仅作为内部辅助线索。"
 
-  - insightType: anger_with_emotional_stress
-    insightName: 愤怒伴随紧张或负向情绪线索
-    sourceInsightTypes:
-      - voice_anger
-      - voice_tension
-      - voice_negative_valence
-      - voice_sadness
-      - voice_fear
-    requiredInsightTypes:
-      - voice_anger
-    requiredAnyInsightTypes:
-      - voice_tension
-      - voice_negative_valence
-      - voice_sadness
-      - voice_fear
-    minDistinctTypes: 2
-    withinSec: 20.0
-    conclusion: need_attention
-    matchedRuleCode: voice_anger_with_emotional_stress
-    reasonTemplate: "{startSec}s-{endSec}s 愤怒语音与紧张、负向、悲伤或恐惧线索接近出现，建议重点复核。"
-
   - insightType: dense_conflict_signals_30s
     insightName: 30秒内冲突线索密集出现
     sourceInsightTypes:
@@ -464,54 +443,6 @@ compositeInsights:
     reasonTemplate: "{startSec}s-{endSec}s 30秒内多次出现求助、哭泣、痛苦或异常呼吸相关线索，建议重点复核。"
 
 attentionRules:
-  - code: voice_anger_high_attention
-    insightType: voice_anger
-    conclusion: need_attention
-    maxScoreGte: 0.60
-    reasonTemplate: "{startSec}s-{endSec}s 出现较高置信愤怒语音线索，建议重点复核。"
-
-  - code: voice_anger_repeated_or_sustained_attention
-    insightType: voice_anger
-    conclusion: need_attention
-    all:
-      - maxScoreGte: 0.40
-      - any:
-          - occurrenceCountGte: 2
-          - totalDurationSecGte: 8.0
-    reasonTemplate: "{startSec}s-{endSec}s 愤怒语音线索重复或持续出现，建议重点复核。"
-
-  - code: voice_anger_medium_review
-    insightType: voice_anger
-    conclusion: review_suggested
-    all:
-      - maxScoreGte: 0.40
-      - maxScoreLt: 0.60
-    reasonTemplate: "{startSec}s-{endSec}s 出现中等置信愤怒语音线索，建议复核。"
-
-  - code: voice_fear_medium_review
-    insightType: voice_fear
-    conclusion: review_suggested
-    maxScoreGte: 0.40
-    reasonTemplate: "{startSec}s-{endSec}s 出现疑似恐惧语音线索，建议复核。"
-
-  - code: voice_sadness_medium_review
-    insightType: voice_sadness
-    conclusion: review_suggested
-    maxScoreGte: 0.40
-    reasonTemplate: "{startSec}s-{endSec}s 出现疑似悲伤语音线索，建议复核。"
-
-  - code: voice_tension_medium_review
-    insightType: voice_tension
-    conclusion: review_suggested
-    maxScoreGte: 0.40
-    reasonTemplate: "{startSec}s-{endSec}s 出现语音紧张或高唤醒线索，建议复核。"
-
-  - code: voice_negative_valence_review
-    insightType: voice_negative_valence
-    conclusion: review_suggested
-    maxScoreLte: 0.40
-    reasonTemplate: "{startSec}s-{endSec}s 出现语音负向情绪线索，建议复核。"
-
   - code: screaming_high_confidence
     insightType: suspected_screaming
     conclusion: need_attention

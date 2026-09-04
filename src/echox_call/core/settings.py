@@ -76,6 +76,8 @@ class PostcallWorkerSettings:
     wavlm_backbone_dir: Path
     wavlm_labels_path: Path
     attention_rules_path: Path
+    attention_rule_whitelist_path: Path
+    whitelist_attention_rules_path: Path
     skip_call_id_jobs: bool
     call_id_fallback_after_seconds: int
 
@@ -294,6 +296,16 @@ def load_postcall_worker_settings(
             source,
             "POSTCALL_ATTENTION_RULES_PATH",
             "config/postcall_attention_rules.yaml",
+        ),
+        attention_rule_whitelist_path=_env_path(
+            source,
+            "POSTCALL_ATTENTION_RULE_WHITELIST_PATH",
+            "config/postcall_attention_rule_whitelist.yaml",
+        ),
+        whitelist_attention_rules_path=_env_path(
+            source,
+            "POSTCALL_WHITELIST_ATTENTION_RULES_PATH",
+            "config/postcall_attention_rules_whitelist.yaml",
         ),
         skip_call_id_jobs=_env_bool(source, "POSTCALL_WORKER_SKIP_CALL_ID_JOBS", False),
         call_id_fallback_after_seconds=_env_int(

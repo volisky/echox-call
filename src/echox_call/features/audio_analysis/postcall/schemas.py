@@ -46,6 +46,13 @@ def _strip_optional_non_blank(value: str | None, field_name: str) -> str | None:
     return _strip_non_blank(value, field_name)
 
 
+def _strip_optional_blank_as_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 def _validate_public_http_url(value: str, field_name: str) -> str:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"}:
@@ -101,14 +108,15 @@ class RiskPerson(BaseModel):
     @field_validator("idcard", "report")
     @classmethod
     def validate_optional_text(cls, value: str | None, info: Any) -> str | None:
-        return _strip_optional_non_blank(value, f"riskPerson.{info.field_name}")
+        return _strip_optional_blank_as_none(value)
 
     @field_validator("tags")
     @classmethod
     def validate_tags(cls, value: list[str]) -> list[str]:
         return [
-            _strip_non_blank(tag, "riskPerson.tags[]")
+            stripped
             for tag in value
+            if isinstance(tag, str) and (stripped := tag.strip())
         ]
 
 
@@ -159,10 +167,22 @@ class CreatePostcallJobRequest(BaseModel):
     def validate_required_text(cls, value: str, info: Any) -> str:
         return _strip_non_blank(value, info.field_name)
 
-    @field_validator("callId", "jqxldm", "jqzldm", "callbackUrl", "alarmContent", "alarmAddress")
+    @field_validator("callId", "jqxldm", "jqzldm", "callbackUrl", "alarmContent")
     @classmethod
     def validate_optional_text(cls, value: str | None, info: Any) -> str | None:
         return _strip_optional_non_blank(value, info.field_name)
+
+    @field_validator("alarmAddress")
+    @classmethod
+    def validate_optional_high_incident_address(cls, value: str | None) -> str | None:
+        return _strip_optional_blank_as_none(value)
+
+    @field_validator("isHighIncidentAddress", mode="before")
+    @classmethod
+    def validate_optional_high_incident_address_flag(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("audioUrl")
     @classmethod

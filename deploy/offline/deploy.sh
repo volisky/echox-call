@@ -99,6 +99,8 @@ POSTCALL_AUDIO_MAX_BYTES=104857600
 POSTCALL_AUDIO_MAX_DURATION_SEC=600
 POSTCALL_AUDIO_DOWNLOAD_TIMEOUT_SEC=30
 POSTCALL_AUDIO_EVENT_TOP_K=20
+POSTCALL_AUDIO_RETENTION_DAYS=15
+POSTCALL_AUDIO_CLEANUP_INTERVAL_SECONDS=21600
 POSTCALL_TORCH_NUM_THREADS=4
 POSTCALL_TORCH_INTEROP_THREADS=1
 
@@ -110,6 +112,8 @@ POSTCALL_WAVLM_LABELS_PATH=/app/docs/postcall-wavlm-output-labels.csv
 POSTCALL_DIARIZATION_MODEL_DIR=/app/models/speaker-diarization-community-1
 POSTCALL_DIARIZATION_NUM_SPEAKERS=2
 POSTCALL_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules.yaml
+POSTCALL_ATTENTION_RULE_WHITELIST_PATH=/app/config/postcall_attention_rule_whitelist.yaml
+POSTCALL_WHITELIST_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules_whitelist.yaml
 
 POSTCALL_REALTIME_STORAGE_DIR=/app/data/realtime
 POSTCALL_REALTIME_WINDOW_SEC=10
@@ -173,7 +177,7 @@ if [[ "$START_SERVICES" -eq 0 ]]; then
   echo "  cd $INSTALL_DIR"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d postgres"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} --profile tools run --rm migrate"
-  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker realtime-worker console"
+  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker audio-cleanup realtime-worker console"
   exit 0
 fi
 
@@ -184,7 +188,7 @@ echo "running migrations..."
 $COMPOSE "${COMPOSE_ARGS[@]}" --profile tools run --rm migrate
 
 echo "starting application services..."
-SERVICES=(api worker realtime-worker console)
+SERVICES=(api worker audio-cleanup realtime-worker console)
 if [[ "$START_LLM_WORKER" == "1" ]]; then
   SERVICES+=(llm-worker)
 fi

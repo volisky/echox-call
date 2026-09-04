@@ -1,0 +1,16 @@
+enabled: true
+
+# Names are compared after trimming whitespace.
+names: []
+
+# Phones are compared after removing spaces, hyphens, parentheses, and +86/86 prefixes.
+phones:
+  - "19896160163"
+  - "17339920209"
+
+# Optional combined entries. Either field can be omitted.
+people:
+  - name: 任大积
+    phone: "19896160163"
+  - name: 朱行健
+    phone: "17339920209"

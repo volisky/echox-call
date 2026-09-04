@@ -1,0 +1,1 @@
+"""Annotation-only reverse gateway."""

@@ -62,6 +62,22 @@ ECHOX_CALL_WORKER_ID_PREFIX=postcall-worker
 ./start.sh console
 ```
 
+## 情绪微调标注台
+
+登录控制台后进入“情绪标注”。标注台用于为
+`tiantiaf/wavlm-large-categorical-emotion` 建立人工复核数据，不会提交报警分析任务。
+
+- 上传音频，或从受控的服务器目录选择文件加入素材库；默认目录为
+  `data/emotion_annotation_server_audio`，可通过
+  `EMOTION_ANNOTATION_SERVER_AUDIO_ROOT` 修改。
+- 一段音频按情绪稳定的人声片段切分。每段只选一个主情绪，以匹配现有 9 类
+  softmax 分类器；辅助情绪、重叠说话和不确定性会额外保存，供复核使用。
+- 同一位或不同标注者可多次提交同一音频。每次提交均保存为独立版本，页面会显示
+  已标注次数和标注者人数，不会覆盖历史判断。
+- 在标注台可导出 JSONL；每行包含本地音频路径、切片起止秒、主情绪和质量标记。
+
+详细的标注和入训规则见 `docs/emotion-annotation-guide.md`。
+
 ## 访问地址
 
 - API：http://127.0.0.1:8000

@@ -19,6 +19,11 @@ class ClaimedPostcallJob:
     attempt_count: int
     max_attempts: int
     duplicate_count: int
+    call_id: str | None = None
+    bjdh: str | None = None
+    bjrmc: str | None = None
+    lxdh: str | None = None
+    raw_payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import mimetypes
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -21,6 +22,16 @@ from echox_call.console.auth import (
     create_console_session_cookie,
     get_console_session_user,
     load_console_auth_config,
+)
+from echox_call.console.annotations import (
+    EMOTION_LABELS,
+    EmotionAnnotationError,
+    EmotionAnnotationRepository,
+    get_server_audio_root,
+    parse_annotation_submission,
+    save_annotation_upload,
+    scan_server_audio_files,
+    server_audio_file_from_relative_path,
 )
 from echox_call.console.jobs import ConsoleJobRepository, JobListFilters, LEVEL_FILTER_OPTIONS
 from echox_call.console.upload import (
@@ -40,6 +51,7 @@ CONSOLE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(CONSOLE_ROOT / "templates"))
 router = APIRouter(include_in_schema=False)
 job_repository = ConsoleJobRepository()
+annotation_repository = EmotionAnnotationRepository()
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,7 @@ NAV_ITEMS = (
     ConsoleNavItem("overview", "首页", "/console/", "运行概览"),
     ConsoleNavItem("jobs", "分析任务", "/console/jobs", "任务管理"),
     ConsoleNavItem("upload", "音频测试", "/console/upload", "上传并提交任务"),
+    ConsoleNavItem("annotations", "情绪标注", "/console/annotations", "微调数据集"),
 )
 
 
@@ -268,6 +281,186 @@ def console_uploaded_audio(filename: str):
     )
 
 
+@router.get("/annotations", response_class=HTMLResponse)
+def console_annotations(request: Request) -> HTMLResponse:
+    error_message = ""
+    try:
+        summary = annotation_repository.get_summary()
+        audio_files = annotation_repository.list_audio_files()
+        server_root = get_server_audio_root()
+        server_audio_files = scan_server_audio_files(server_root)
+        _add_server_annotation_statuses(server_audio_files)
+    except (DatabaseConfigError, DatabaseConnectionError, EmotionAnnotationError) as exc:
+        summary = {
+            "audio_count": 0,
+            "annotation_count": 0,
+            "unannotated_count": 0,
+            "annotator_count": 0,
+        }
+        audio_files = []
+        server_root = get_server_audio_root()
+        server_audio_files = []
+        error_message = str(exc)
+
+    return render_console_page(
+        request,
+        "console/annotations.html",
+        active_nav="annotations",
+        page_title="情绪微调标注台",
+        page_description="把人声按稳定情绪切片标注；保留每位标注者的每一次提交，用于后续复核和微调。",
+        context={
+            "summary": summary,
+            "audio_files": audio_files,
+            "server_audio_files": server_audio_files,
+            "server_root": str(server_root),
+            "server_audio_truncated": len(server_audio_files) >= 2000,
+            "error_message": error_message,
+            "import_message": request.query_params.get("message", ""),
+        },
+    )
+
+
+@router.post("/annotations/upload", response_class=HTMLResponse)
+async def console_annotation_upload(request: Request) -> Response:
+    try:
+        _, uploaded_file = parse_multipart_form(
+            await request.body(),
+            request.headers.get("content-type"),
+        )
+        uploaded_audio = save_annotation_upload(uploaded_file)
+        user = request.state.console_user
+        audio, created = annotation_repository.add_audio_file(uploaded_audio, imported_by=user.username)
+        if created:
+            return RedirectResponse(url=f"/console/annotations/{audio.id}?uploaded=1", status_code=303)
+        return RedirectResponse(
+            url=f"/console/annotations/{audio.id}?message=该文件已在标注素材库中，已直接打开。",
+            status_code=303,
+        )
+    except (
+        ConsoleUploadError,
+        DatabaseConfigError,
+        DatabaseConnectionError,
+        EmotionAnnotationError,
+    ) as exc:
+        return _render_annotations_error(request, str(exc), status_code=400)
+
+
+@router.post("/annotations/import-server", response_class=HTMLResponse)
+async def console_annotation_import_server(request: Request) -> Response:
+    form = _parse_urlencoded_form(await request.body())
+    selected_paths = form.get("server_path", [])
+    if not selected_paths:
+        return _render_annotations_error(request, "请先勾选至少一个服务器音频文件。", status_code=400)
+
+    try:
+        user = request.state.console_user
+        source_audios = [
+            server_audio_file_from_relative_path(relative_path)
+            for relative_path in selected_paths[:2000]
+        ]
+        imported_count = 0
+        existing_count = 0
+        for source_audio in source_audios:
+            _, created = annotation_repository.add_audio_file(source_audio, imported_by=user.username)
+            if created:
+                imported_count += 1
+            else:
+                existing_count += 1
+    except (DatabaseConfigError, DatabaseConnectionError, EmotionAnnotationError) as exc:
+        return _render_annotations_error(request, str(exc), status_code=400)
+
+    message = f"已加入 {imported_count} 个服务器音频"
+    if existing_count:
+        message += f"；{existing_count} 个已存在，未重复创建"
+    return RedirectResponse(url=f"/console/annotations?message={quote(message, safe='')}", status_code=303)
+
+
+@router.get("/annotations/export.jsonl", response_model=None)
+def console_annotation_export() -> Response:
+    try:
+        content = annotation_repository.export_jsonl()
+    except (DatabaseConfigError, DatabaseConnectionError) as exc:
+        return PlainTextResponse(str(exc), status_code=500)
+    return PlainTextResponse(
+        content,
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="wavlm_emotion_annotations.jsonl"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/annotations/export-soft-labels.jsonl", response_model=None)
+def console_annotation_soft_label_export() -> Response:
+    try:
+        content = annotation_repository.export_soft_label_jsonl()
+    except (DatabaseConfigError, DatabaseConnectionError) as exc:
+        return PlainTextResponse(str(exc), status_code=500)
+    return PlainTextResponse(
+        content,
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="wavlm_emotion_soft_labels.jsonl"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/annotations/{audio_id}", response_class=HTMLResponse)
+def console_annotation_editor(request: Request, audio_id: str) -> HTMLResponse:
+    return _render_annotation_editor(request, audio_id)
+
+
+@router.post("/annotations/{audio_id}", response_class=HTMLResponse)
+async def console_annotation_editor_post(request: Request, audio_id: str) -> Response:
+    form = _parse_urlencoded_form(await request.body())
+    try:
+        submission = parse_annotation_submission(form)
+        duration_raw = _form_value(form, "duration_sec")
+        duration_sec = float(duration_raw) if duration_raw else None
+        if duration_sec is not None and (
+            not isfinite(duration_sec) or duration_sec < 0 or duration_sec > 24 * 60 * 60
+        ):
+            raise EmotionAnnotationError("音频时长不在允许范围内。")
+        user = request.state.console_user
+        annotation_repository.save_annotation(
+            audio_file_id=audio_id,
+            annotator_username=user.username,
+            annotator_name=user.name,
+            submission=submission,
+            duration_sec=duration_sec,
+        )
+    except ValueError:
+        return _render_annotation_editor(
+            request,
+            audio_id,
+            error_message="浏览器未能读取有效的音频时长，请重新加载音频后再保存。",
+            status_code=400,
+        )
+    except (DatabaseConfigError, DatabaseConnectionError, EmotionAnnotationError) as exc:
+        return _render_annotation_editor(request, audio_id, error_message=str(exc), status_code=400)
+    return RedirectResponse(url=f"/console/annotations/{audio_id}?saved=1", status_code=303)
+
+
+@router.api_route("/annotations/{audio_id}/audio", methods=["GET", "HEAD"], response_model=None)
+def console_annotation_audio(audio_id: str) -> Response:
+    try:
+        audio = annotation_repository.get_audio_file(audio_id)
+    except (DatabaseConfigError, DatabaseConnectionError) as exc:
+        return PlainTextResponse(str(exc), status_code=500)
+    if audio is None or not audio.stored_path.is_file():
+        return PlainTextResponse("标注音频不存在或已从服务器移除。", status_code=404)
+    return FileResponse(
+        path=audio.stored_path,
+        media_type=audio.content_type or "audio/*",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=60",
+        },
+    )
+
+
 @router.get("/jobs", response_class=HTMLResponse)
 def console_jobs(request: Request) -> HTMLResponse:
     return _render_jobs_page(
@@ -425,6 +618,115 @@ def _load_job_detail(job_id: str) -> tuple[Any, bool, str, int]:
         status_code = 500
 
     return detail, not_found, error_message, status_code
+
+
+def _render_annotations_error(request: Request, error_message: str, *, status_code: int) -> HTMLResponse:
+    """Render the library again so an import/upload error does not strand the user."""
+    try:
+        summary = annotation_repository.get_summary()
+        audio_files = annotation_repository.list_audio_files()
+        server_root = get_server_audio_root()
+        server_audio_files = scan_server_audio_files(server_root)
+        _add_server_annotation_statuses(server_audio_files)
+    except (DatabaseConfigError, DatabaseConnectionError, EmotionAnnotationError):
+        summary = {
+            "audio_count": 0,
+            "annotation_count": 0,
+            "unannotated_count": 0,
+            "annotator_count": 0,
+        }
+        audio_files = []
+        server_root = get_server_audio_root()
+        server_audio_files = []
+    return render_console_page(
+        request,
+        "console/annotations.html",
+        active_nav="annotations",
+        page_title="情绪微调标注台",
+        page_description="把人声按稳定情绪切片标注；保留每位标注者的每一次提交，用于后续复核和微调。",
+        status_code=status_code,
+        context={
+            "summary": summary,
+            "audio_files": audio_files,
+            "server_audio_files": server_audio_files,
+            "server_root": str(server_root),
+            "server_audio_truncated": len(server_audio_files) >= 2000,
+            "error_message": error_message,
+            "import_message": "",
+        },
+    )
+
+
+def _render_annotation_editor(
+    request: Request,
+    audio_id: str,
+    *,
+    error_message: str = "",
+    status_code: int = 200,
+) -> HTMLResponse:
+    try:
+        audio = annotation_repository.get_audio_file(audio_id)
+        annotation_count = annotation_repository.get_annotation_count(audio_id) if audio else 0
+    except (DatabaseConfigError, DatabaseConnectionError) as exc:
+        audio = None
+        annotation_count = 0
+        error_message = error_message or str(exc)
+        status_code = 500
+    if audio is None:
+        return render_console_page(
+            request,
+            "console/annotation_editor.html",
+            active_nav="annotations",
+            page_title="标注音频不存在",
+            page_description="该音频可能尚未导入，或已被移除。",
+            status_code=404,
+            context={
+                "audio": None,
+                "annotation_count": 0,
+                "emotion_labels": EMOTION_LABELS,
+                "error_message": error_message or "未找到指定的标注音频。",
+                "result_message": "",
+            },
+        )
+    result_message = ""
+    if request.query_params.get("saved") == "1":
+        result_message = "本次标注已保存为一条记录；页面已开始一份新的空白标注。"
+    elif request.query_params.get("uploaded") == "1":
+        result_message = "音频已加入素材库。请先播放并切分人声片段，再提交第一份标注。"
+    elif request.query_params.get("message"):
+        result_message = request.query_params["message"]
+    return render_console_page(
+        request,
+        "console/annotation_editor.html",
+        active_nav="annotations",
+        page_title="音频情绪标注",
+        page_description="人工标注使用单一主情绪硬标签；训练时按重叠区间和把握程度聚合为软标签。",
+        status_code=status_code,
+        context={
+            "audio": audio,
+            "audio_url": str(request.url_for("console_annotation_audio", audio_id=audio.id)),
+            "annotation_count": annotation_count,
+            "emotion_labels": EMOTION_LABELS,
+            "error_message": error_message,
+            "result_message": result_message,
+        },
+    )
+
+
+def _add_server_annotation_statuses(server_audio_files: list[dict[str, Any]]) -> None:
+    statuses = annotation_repository.get_server_audio_statuses()
+    for audio in server_audio_files:
+        status = statuses.get(audio["relative_path"])
+        if status is None:
+            audio.update(
+                {
+                    "is_imported": False,
+                    "annotation_count": 0,
+                    "annotator_count": 0,
+                }
+            )
+            continue
+        audio.update(status)
 
 
 def _clean_query_value(value: str | None, *, max_length: int | None = None) -> str | None:

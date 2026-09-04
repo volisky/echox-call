@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -139,14 +140,19 @@ def normalize_audio(
             always_2d=True,
             dtype="float32",
         )
-    except Exception as exc:
-        raise AudioProcessingError(
-            "UNSUPPORTED_AUDIO_FORMAT",
-            f"audio format is not supported by soundfile: {source_path.name}",
-        ) from exc
+    except Exception:
+        return _normalize_audio_with_ffmpeg(
+            source_path=source_path,
+            normalized_path=normalized_path,
+            max_duration_sec=max_duration_sec,
+        )
 
     if audio.size == 0:
-        raise AudioProcessingError("EMPTY_AUDIO", "audio contains no samples")
+        return _normalize_audio_with_ffmpeg(
+            source_path=source_path,
+            normalized_path=normalized_path,
+            max_duration_sec=max_duration_sec,
+        )
 
     channels = int(audio.shape[1])
     mono = audio.mean(axis=1).astype(np.float32)
@@ -168,6 +174,91 @@ def normalize_audio(
     digest = _sha256_file(normalized_path)
     size_bytes = normalized_path.stat().st_size
 
+    return NormalizedAudio(
+        path=normalized_path,
+        waveform=mono,
+        sample_rate=TARGET_SAMPLE_RATE,
+        channels=1 if channels > 0 else channels,
+        duration_sec=float(len(mono) / TARGET_SAMPLE_RATE),
+        sha256=digest,
+        size_bytes=size_bytes,
+    )
+
+
+def _normalize_audio_with_ffmpeg(
+    *,
+    source_path: Path,
+    normalized_path: Path,
+    max_duration_sec: int,
+) -> NormalizedAudio:
+    command = [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        str(TARGET_SAMPLE_RATE),
+        "-sample_fmt",
+        "s16",
+        "-acodec",
+        "pcm_s16le",
+        str(normalized_path),
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise AudioProcessingError(
+            "UNSUPPORTED_AUDIO_FORMAT",
+            "ffmpeg is not available in this worker image",
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        message = f"ffmpeg could not decode audio: {source_path.name}"
+        if detail:
+            message = f"{message}; {detail[:500]}"
+        raise AudioProcessingError("UNSUPPORTED_AUDIO_FORMAT", message) from exc
+
+    if not normalized_path.exists() or normalized_path.stat().st_size == 0:
+        raise AudioProcessingError("EMPTY_AUDIO", "ffmpeg produced an empty audio file")
+
+    try:
+        audio, sample_rate = sf.read(
+            normalized_path,
+            always_2d=True,
+            dtype="float32",
+        )
+    except Exception as exc:
+        raise AudioProcessingError(
+            "UNSUPPORTED_AUDIO_FORMAT",
+            "ffmpeg output could not be read as wav",
+        ) from exc
+
+    if audio.size == 0:
+        raise AudioProcessingError("EMPTY_AUDIO", "audio contains no samples after ffmpeg decode")
+
+    channels = int(audio.shape[1])
+    mono = audio.mean(axis=1).astype(np.float32)
+    duration_sec = float(len(mono) / sample_rate)
+    if duration_sec > max_duration_sec:
+        raise AudioProcessingError(
+            "AUDIO_TOO_LONG",
+            f"audio duration exceeds limit: {duration_sec:.3f}s",
+        )
+
+    digest = _sha256_file(normalized_path)
+    size_bytes = normalized_path.stat().st_size
     return NormalizedAudio(
         path=normalized_path,
         waveform=mono,

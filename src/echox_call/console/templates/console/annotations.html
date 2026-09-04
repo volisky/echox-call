@@ -1,0 +1,164 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  <section class="annotation-library">
+    {% if error_message %}
+      <div class="form-alert form-alert-error">{{ error_message }}</div>
+    {% endif %}
+    {% if import_message %}
+      <div class="form-alert form-alert-success">{{ import_message }}</div>
+    {% endif %}
+
+    <div class="annotation-metric-grid" aria-label="标注进度">
+      <div class="annotation-metric-card">
+        <span>已入库音频</span>
+        <strong>{{ summary.audio_count }}</strong>
+        <small>可从此处选择开始标注</small>
+      </div>
+      <div class="annotation-metric-card">
+        <span>已保存标注</span>
+        <strong>{{ summary.annotation_count }}</strong>
+        <small>每次提交均保留为新版本</small>
+      </div>
+      <div class="annotation-metric-card">
+        <span>尚未标注</span>
+        <strong>{{ summary.unannotated_count }}</strong>
+        <small>优先完成首轮标注</small>
+      </div>
+      <div class="annotation-metric-card">
+        <span>参与标注者</span>
+        <strong>{{ summary.annotator_count }}</strong>
+        <small>建议每段至少两人独立标注</small>
+      </div>
+    </div>
+
+    <div class="annotation-guidance-card">
+      <div>
+        <span class="detail-kicker">WavLM-Large · 9 类分类</span>
+        <h2>先切片，再给主情绪</h2>
+        <p>标注时每个稳定片段只选择一个主情绪硬标签；训练准备时，平台按重叠时间区间和 1–5 级把握程度加权平均为 9 类软标签。辅助情绪只用于复核，不直接参与软标签计算。</p>
+      </div>
+      <div class="annotation-export-actions">
+        <a class="plain-button" href="/console/annotations/export.jsonl">导出原始标注</a>
+        <a class="primary-button" href="/console/annotations/export-soft-labels.jsonl">导出训练软标签</a>
+      </div>
+    </div>
+
+    <div class="annotation-import-grid">
+      <section class="annotation-panel">
+        <div class="annotation-panel-heading">
+          <div>
+            <span class="detail-kicker">方式一</span>
+            <h2>上传新音频</h2>
+            <p>文件会写入受控服务器音频目录的“上传文件”子目录，并与服务器已有音频一起显示；不会触发报警音频分析任务。</p>
+          </div>
+        </div>
+        <form action="/console/annotations/upload" method="post" enctype="multipart/form-data" data-annotation-upload-form>
+          <label class="annotation-upload-dropzone" data-annotation-upload-dropzone>
+            <input name="audio_file" type="file" accept=".wav,.mp3,.m4a,.flac,.ogg,.aac,audio/*" required data-annotation-upload-input>
+            <span class="upload-file-button">选择音频</span>
+            <span class="upload-dropzone-main">拖入或选择待标注的音频文件</span>
+            <span class="upload-file-name" data-annotation-upload-name>支持 WAV、MP3、M4A、FLAC、OGG、AAC，最大 100MB</span>
+          </label>
+          <div class="annotation-form-actions">
+            <button class="primary-button" type="submit" data-annotation-upload-submit>上传并开始标注</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="annotation-panel annotation-server-panel">
+        <div class="annotation-panel-heading">
+          <div>
+            <span class="detail-kicker">方式二</span>
+            <h2>选择服务器已有音频</h2>
+            <p>仅扫描预先配置的安全目录：<code>{{ server_root }}</code></p>
+          </div>
+        </div>
+        {% if server_audio_files %}
+          <form action="/console/annotations/import-server" method="post">
+            <div class="annotation-server-list" aria-label="服务器音频文件列表">
+              {% for item in server_audio_files %}
+                <label class="annotation-server-row">
+                  <input type="checkbox" name="server_path" value="{{ item.relative_path }}">
+                  <span class="annotation-server-name">{{ item.display_name }}</span>
+                  <span class="annotation-server-status">
+                    {% if item.is_imported %}
+                      {% if item.annotation_count %}
+                        已标注 {{ item.annotation_count }} 次 · {{ item.annotator_count }} 人
+                      {% else %}
+                        已入库 · 未标注
+                      {% endif %}
+                    {% else %}
+                      未入库
+                    {% endif %}
+                  </span>
+                  <span>{{ item.size_text }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            {% if server_audio_truncated %}
+              <p class="annotation-hint">为保证页面性能，只显示前 2000 个音频；请将待标注文件放入一个更小的服务器子目录后刷新。</p>
+            {% endif %}
+            <div class="annotation-form-actions">
+              <button class="plain-button" type="submit">将勾选文件加入素材库</button>
+            </div>
+          </form>
+        {% else %}
+          <div class="annotation-empty">
+            <strong>暂未发现可导入的服务器音频</strong>
+            <p>请把音频放入上述目录，或在环境变量 <code>EMOTION_ANNOTATION_SERVER_AUDIO_ROOT</code> 中指定受控目录后刷新页面。</p>
+          </div>
+        {% endif %}
+      </section>
+    </div>
+
+    <section class="annotation-panel annotation-library-table-panel">
+      <div class="annotation-panel-heading annotation-library-table-heading">
+        <div>
+          <span class="detail-kicker">素材库</span>
+          <h2>选择要标注的音频</h2>
+          <p>“已标注次数”是所有人的所有提交版本数量；它用于安排双人复核，不代表系统已自动判定哪一份正确。</p>
+        </div>
+      </div>
+      {% if audio_files %}
+        <div class="annotation-table-wrap">
+          <table class="annotation-table">
+            <thead>
+              <tr>
+                <th>音频</th>
+                <th>来源</th>
+                <th>时长 / 大小</th>
+                <th>已标注次数</th>
+                <th>最近标注</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for audio in audio_files %}
+                <tr>
+                  <td>
+                    <strong>{{ audio.original_filename }}</strong>
+                    <small>{{ audio.source_reference }}</small>
+                  </td>
+                  <td>{{ "平台上传" if audio.source_type == "upload" else "服务器导入" }}</td>
+                  <td>{{ audio.duration_text }}<small>{{ audio.size_text }}</small></td>
+                  <td>
+                    <span class="annotation-count">{{ audio.annotation_count }} 次</span>
+                    <small>{{ audio.annotator_count }} 位标注者</small>
+                  </td>
+                  <td>{{ audio.last_annotated_at_text }}</td>
+                  <td><a class="plain-button" href="/console/annotations/{{ audio.id }}">{% if audio.annotation_count %}再次标注{% else %}开始标注{% endif %}</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="annotation-empty">
+          <strong>素材库为空</strong>
+          <p>先上传文件，或从服务器目录勾选要纳入标注的音频。</p>
+        </div>
+      {% endif %}
+    </section>
+  </section>
+{% endblock %}

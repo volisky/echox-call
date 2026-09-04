@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import socket
 import time
+import os
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -20,9 +22,14 @@ from echox_call.features.audio_analysis.postcall.audio_processing import (
     normalize_audio,
 )
 from echox_call.features.audio_analysis.postcall.attention_rules import (
+    AttentionEvaluation,
     AttentionRulesEngine,
     PostcallAttentionRuleError,
     load_attention_rules,
+)
+from echox_call.features.audio_analysis.postcall.attention_rule_whitelist import (
+    AttentionRuleWhitelist,
+    load_attention_rule_whitelist,
 )
 from echox_call.features.audio_analysis.postcall.model_runtime import (
     BeatsAudioEventModel,
@@ -51,6 +58,9 @@ RETRYABLE_WORKER_ERROR_CODES = {
     "AUDIO_DOWNLOAD_FAILED",
     "WORKER_FAILED",
 }
+WHITELIST_AUDIO_REVIEW_RULE_CODE = "voice_anger_medium_review"
+WHITELIST_AUDIO_REVIEW_TITLE = "疑似愤怒语音线索"
+WHITELIST_AUDIO_REVIEW_REASON = "出现中等置信愤怒语音线索，建议复核。"
 
 
 class PostcallWorker:
@@ -69,6 +79,7 @@ class PostcallWorker:
         self._diarization_model: SpeakerDiarizationModel | None = None
         self._wavlm_model: WavLMEmotionModel | None = None
         self._attention_rules: AttentionRulesEngine | None = None
+        self._attention_rule_whitelist: AttentionRuleWhitelist | None = None
 
     def run_once(self, *, batch_size: int | None = None) -> int:
         limit = self.settings.batch_size if batch_size is None else batch_size
@@ -272,8 +283,10 @@ class PostcallWorker:
 
         segments = assign_segment_ids(beats_segments + wavlm_segments)
         self._validate_public_segments(segments)
-        attention_evaluation = self.attention_rules.evaluate(
-            [_timeline_segment_payload(segment) for segment in segments]
+        timeline_payload = [_timeline_segment_payload(segment) for segment in segments]
+        attention_evaluation, attention_rule_profile = self.evaluate_attention_for_job(
+            job=job,
+            timeline=timeline_payload,
         )
         self.repository.persist_success(
             job=job,
@@ -288,6 +301,7 @@ class PostcallWorker:
                 "channels": normalized.channels,
                 "timelineSegmentCount": len(segments),
                 "attentionRuleVersion": attention_evaluation.rule_version,
+                "attentionRuleProfile": attention_rule_profile,
                 "level": attention_evaluation.level,
                 "levelName": attention_evaluation.level_name,
                 "insightCount": len(attention_evaluation.insights),
@@ -346,6 +360,25 @@ class PostcallWorker:
         if self._attention_rules is None:
             self._attention_rules = load_attention_rules(self.settings.attention_rules_path)
         return self._attention_rules
+
+    @property
+    def attention_rule_whitelist(self) -> AttentionRuleWhitelist:
+        if self._attention_rule_whitelist is None:
+            self._attention_rule_whitelist = load_attention_rule_whitelist(
+                _attention_rule_whitelist_path(self.settings)
+            )
+        return self._attention_rule_whitelist
+
+    def evaluate_attention_for_job(
+        self,
+        *,
+        job: ClaimedPostcallJob,
+        timeline: list[dict[str, Any]],
+    ) -> tuple[AttentionEvaluation, str]:
+        evaluation = self.attention_rules.evaluate(timeline)
+        if not self.attention_rule_whitelist.matches_job(job):
+            return evaluation, "default"
+        return _ensure_whitelist_review(evaluation, timeline), "whitelist_direct_review"
 
     def _run_diarization(
         self,
@@ -440,6 +473,110 @@ def _timeline_segment_payload(segment: TimelineSegmentRecord) -> dict[str, objec
         "voiceEmotionScores": segment.voice_emotion_scores,
         "voiceEmotionDimensions": segment.voice_emotion_dimensions,
     }
+
+
+def _attention_rule_whitelist_path(settings: PostcallWorkerSettings) -> Path:
+    configured = getattr(settings, "attention_rule_whitelist_path", None)
+    if configured is not None:
+        return Path(configured)
+
+    env_path = os.environ.get("POSTCALL_ATTENTION_RULE_WHITELIST_PATH")
+    if env_path:
+        return Path(env_path)
+
+    return Path("config/postcall_attention_rule_whitelist.yaml")
+
+
+def _ensure_whitelist_review(
+    evaluation: AttentionEvaluation,
+    timeline: list[dict[str, Any]],
+) -> AttentionEvaluation:
+    if evaluation.level <= 2:
+        return evaluation
+
+    start_sec, end_sec = _timeline_bounds(timeline)
+    review_segment = {
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "title": WHITELIST_AUDIO_REVIEW_TITLE,
+        "level": 2,
+        "levelName": "建议复核",
+        "attentionConclusion": "review_suggested",
+        "ruleCategory": "voice_emotion",
+        "reason": WHITELIST_AUDIO_REVIEW_REASON,
+        "confidence": "medium",
+        "matchedRuleCodes": [WHITELIST_AUDIO_REVIEW_RULE_CODE],
+        "sourceSegments": [],
+        "audioEvents": [],
+        "voiceStates": [],
+    }
+    review_range = {
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "result": WHITELIST_AUDIO_REVIEW_TITLE,
+        "reason": WHITELIST_AUDIO_REVIEW_REASON,
+        "confidence": "medium",
+        "matchedRuleCodes": [WHITELIST_AUDIO_REVIEW_RULE_CODE],
+    }
+    return replace(
+        evaluation,
+        level=2,
+        level_name="建议复核",
+        review_segments=[*evaluation.review_segments, review_segment],
+        matched_rule_codes=sorted(
+            {*evaluation.matched_rule_codes, WHITELIST_AUDIO_REVIEW_RULE_CODE}
+        ),
+        attention_conclusion="review_suggested",
+        priority=2,
+        key_risk_factors=list(
+            dict.fromkeys([*evaluation.key_risk_factors, WHITELIST_AUDIO_REVIEW_TITLE])
+        ),
+        recommended_review_time_ranges=[
+            *evaluation.recommended_review_time_ranges,
+            review_range,
+        ],
+        evidence_summary=[
+            *evaluation.evidence_summary,
+            {
+                "startSec": start_sec,
+                "endSec": end_sec,
+                "result": WHITELIST_AUDIO_REVIEW_TITLE,
+                "sourceSegments": [],
+                "audioEvents": [],
+                "voiceStates": [],
+            },
+        ],
+        debug_info={
+            **evaluation.debug_info,
+            "whitelistDirectReview": {
+                "matched": True,
+                "originalLevel": evaluation.level,
+                "appliedRuleCode": WHITELIST_AUDIO_REVIEW_RULE_CODE,
+            },
+        },
+    )
+
+
+def _timeline_bounds(timeline: list[dict[str, Any]]) -> tuple[float, float]:
+    starts: list[float] = []
+    ends: list[float] = []
+    for segment in timeline:
+        start_sec = _safe_float(segment.get("startSec"))
+        end_sec = _safe_float(segment.get("endSec"))
+        if start_sec is not None:
+            starts.append(start_sec)
+        if end_sec is not None:
+            ends.append(end_sec)
+    start = round(min(starts), 3) if starts else 0.0
+    end = round(max(ends), 3) if ends else start
+    return start, max(start, end)
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _configure_torch_threads(settings: PostcallWorkerSettings) -> None:

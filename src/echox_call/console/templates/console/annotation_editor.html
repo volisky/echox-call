@@ -1,0 +1,162 @@
+{% extends "console/base.html" %}
+
+{% block content %}
+  {% if not audio %}
+    <div class="form-alert form-alert-error">{{ error_message }}</div>
+    <a class="plain-button" href="/console/annotations">返回标注素材库</a>
+  {% else %}
+    <section class="annotation-editor" data-annotation-editor>
+      {% if error_message %}
+        <div class="form-alert form-alert-error">{{ error_message }}</div>
+      {% endif %}
+      {% if result_message %}
+        <div class="form-alert form-alert-success">{{ result_message }}</div>
+      {% endif %}
+
+      <div class="annotation-editor-layout">
+        <div class="annotation-workbench">
+          <div class="annotation-audio-card">
+            <div class="annotation-audio-heading">
+              <div>
+                <span class="detail-kicker">待标注音频</span>
+                <h2>{{ audio.original_filename }}</h2>
+                <p>{{ "平台上传" if audio.source_type == "upload" else "服务器导入" }} · {{ audio.size_bytes or "-" }} 字节 · 已完成 {{ annotation_count }} 次标注</p>
+              </div>
+              <a class="plain-button" href="/console/annotations">返回素材库</a>
+            </div>
+            <audio controls preload="metadata" src="{{ audio_url }}" data-annotation-audio>
+              您的浏览器不支持播放此音频。
+            </audio>
+            <div class="annotation-inline-timestamp-panel" aria-label="辅助时间戳">
+              <div class="annotation-inline-timestamp-heading">
+                <div>
+                  <span class="detail-kicker">辅助时间戳</span>
+                  <h2>播放位置</h2>
+                  <p>时间只精确到整数秒，仅用于填写开始、结束时间；不关联情绪标签，也不会保存到训练数据。</p>
+                </div>
+                <div class="annotation-timeline-readout" data-annotation-playback-status>当前 0 秒</div>
+              </div>
+              <div class="annotation-timestamp-toolbar">
+                <button class="plain-button" type="button" data-add-annotation-timestamp>插入当前时间戳</button>
+                <span>点击下方时间戳，可填入当前聚焦的开始或结束输入框。</span>
+              </div>
+              <div class="annotation-timestamp-list" data-annotation-timestamp-list aria-live="polite">
+                <span class="annotation-timestamp-empty" data-annotation-timestamp-empty>尚未插入时间戳</span>
+              </div>
+            </div>
+          </div>
+
+          <section class="annotation-instruction-card annotation-instruction-card-compact">
+            <h2>标注提示</h2>
+            <ol>
+              <li>先播放并用播放器进度条定位；开始、结束时间均填写整数秒。</li>
+              <li>在情绪变化、说话人切换或明显停顿处分段，每段只选一个主情绪。</li>
+              <li>环境声、静音或听不清的人声不要硬判；有重叠或不确定性时标记复核。</li>
+            </ol>
+          </section>
+
+          <section class="annotation-history-panel annotation-history-panel-workbench" data-annotation-draft-panel>
+            <div class="annotation-history-heading">
+              <span class="detail-kicker">片段记录</span>
+              <h2 data-annotation-draft-count>本次已保存 0 个片段</h2>
+              <p>这里只显示本次尚未提交的片段，不展示其他人或以前提交的标注细节。</p>
+            </div>
+            <div class="annotation-history-list" data-annotation-draft-list></div>
+            <div class="annotation-empty" data-annotation-draft-empty>
+              <strong>还没有片段记录</strong>
+              <p>在右侧完成一个片段后点击“保存片段”，记录会出现在这里，可回听、编辑或删除。</p>
+            </div>
+          </section>
+        </div>
+
+        <aside class="annotation-side-panel">
+          <form class="annotation-current-panel" method="post" action="/console/annotations/{{ audio.id }}" autocomplete="off" novalidate data-annotation-form>
+            <input type="hidden" name="segment_count" value="0" data-annotation-segment-count>
+            <input type="hidden" name="duration_sec" value="" data-annotation-duration>
+            <div data-annotation-draft-fields></div>
+
+            <div class="annotation-side-heading">
+              <div>
+                <span class="detail-kicker">正在标注</span>
+                <h2 data-annotation-editor-title>新增片段</h2>
+                <p>右侧一次只编辑一个片段；保存后会进入左侧本次片段记录。</p>
+              </div>
+              <div class="annotation-side-actions">
+                <span data-annotation-segment-count-text>本次已保存 0 个</span>
+                <button class="plain-button" type="button" data-clear-current-segment>清空当前片段</button>
+              </div>
+            </div>
+
+            <div class="annotation-segment-list" data-annotation-segment-list></div>
+
+            <section class="annotation-quality-section">
+              <label class="annotation-usable-toggle">
+                <input type="checkbox" name="audio_usable" value="1" autocomplete="off" checked data-audio-usable>
+                <span>
+                  <strong>音频适合做情绪标注</strong>
+                  <small>取消勾选仅用于整段无有效人声、严重损坏或无法播放的文件；取消后请删除所有片段。</small>
+                </span>
+              </label>
+            </section>
+
+            <div class="annotation-save-bar">
+              <span>左侧全部片段将合并保存为一条标注记录。</span>
+              <button class="primary-button" type="submit" data-annotation-save>保存本次标注</button>
+            </div>
+          </form>
+        </aside>
+      </div>
+
+      <script type="text/x-annotation-segment-template" data-annotation-segment-template>
+        <article class="annotation-segment-card" data-annotation-segment>
+          <div class="annotation-segment-topline">
+            <strong>片段 <span data-annotation-segment-number></span></strong>
+          </div>
+          <div class="annotation-time-grid">
+            <label>
+              <span>开始（秒）</span>
+              <div class="annotation-time-control"><input required inputmode="numeric" name="segment___INDEX___start" type="number" min="0" step="1" placeholder="例如 12"><button type="button" data-set-annotation-time="start">写入当前秒</button></div>
+            </label>
+            <label>
+              <span>结束（秒）</span>
+              <div class="annotation-time-control"><input required inputmode="numeric" name="segment___INDEX___end" type="number" min="0" step="1" placeholder="例如 18"><button type="button" data-set-annotation-time="end">写入当前秒</button></div>
+            </label>
+          </div>
+          <fieldset class="annotation-primary-emotions">
+            <legend>主情绪 <em>人工硬标签，必选且仅选一个</em></legend>
+            <div class="annotation-emotion-options">
+              {% for value, label in emotion_labels %}
+                <label><input required type="radio" name="segment___INDEX___primary" value="{{ value }}"><span>{{ label }}</span></label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <fieldset class="annotation-secondary-emotions">
+            <legend>辅助情绪 <em>可选，最多两个；不进入当前单标签训练目标</em></legend>
+            <div class="annotation-emotion-options">
+              {% for value, label in emotion_labels if value not in ["Neutral", "Other"] %}
+                <label><input type="checkbox" name="segment___INDEX___secondary" value="{{ value }}"><span>{{ label }}</span></label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <div class="annotation-segment-footer">
+            <label>把握程度
+              <select name="segment___INDEX___confidence">
+                <option value="5">5 级：非常确定，情绪和边界都清楚</option>
+                <option value="4">4 级：比较确定，仅有轻微干扰</option>
+                <option value="3" selected>3 级：基本确定，存在一定噪声或混合</option>
+                <option value="2">2 级：不太确定，有明显干扰或边界争议</option>
+                <option value="1">1 级：很不确定，仅有弱线索，必须复核</option>
+              </select>
+            </label>
+            <label class="annotation-inline-check"><input type="checkbox" name="segment___INDEX___overlap" value="1"><span>多人重叠说话</span></label>
+            <label class="annotation-inline-check"><input type="checkbox" name="segment___INDEX___needs_review" value="1"><span>需复核</span></label>
+          </div>
+          <div class="annotation-segment-save-row">
+            <span class="annotation-segment-state" data-annotation-segment-state>尚未保存</span>
+            <button class="primary-button annotation-segment-save-button" type="button" data-save-annotation-segment>保存片段</button>
+          </div>
+        </article>
+      </script>
+    </section>
+  {% endif %}
+{% endblock %}
