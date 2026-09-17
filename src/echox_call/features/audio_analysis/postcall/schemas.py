@@ -458,6 +458,11 @@ class OverallResult(BaseModel):
 
     level: AttentionLevel
     levelName: str
+    # 文本（LLM）研判的两个派生字段，与 level 平级。
+    # IfCase 依据的是 **LLM 文本判定的 level**，不是本层融合后的 level，
+    # 所以它与上面的 level 可能不同步；不要按 level 反推该字段。
+    IfCase: int = Field(default=0, ge=0, le=1)
+    CaseReason: str | None = None
     summary: list[str]
     voiceResult: VoiceResult
     inputSnapshot: InputSnapshot

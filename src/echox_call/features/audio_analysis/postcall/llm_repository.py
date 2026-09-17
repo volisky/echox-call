@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from echox_call.core.db import connect
 from echox_call.features.audio_analysis.postcall.llm_worker_models import (
+    CASE_REASON_SEPARATOR,
     ClaimedLlmJob,
     LlmAnalysisOutput,
 )
@@ -394,6 +395,8 @@ class PostcallLlmJobRepository:
         llm_output_json = {
             "level": output.level,
             "levelName": output.level_name,
+            "IfCase": output.if_case,
+            "CaseReason": output.case_reason,
             "caseTypeSummary": output.case_type_summary,
             "caseTypeDetails": output.case_type_details,
             "highRiskAddressSummary": output.high_risk_address_summary,
@@ -484,6 +487,8 @@ class PostcallLlmJobRepository:
         overall_result = OverallResult(
             level=overall_level,
             levelName=overall_level_name,
+            IfCase=resolve_llm_if_case(llm_out),
+            CaseReason=resolve_llm_case_reason(llm_out),
             summary=summary,
             voiceResult=voice_result,
             inputSnapshot=input_snapshot,
@@ -532,6 +537,52 @@ class PostcallLlmJobRepository:
                         "UPDATE postcall_review_segments SET analysis_result_id = %s WHERE postcall_job_id = %s AND analysis_result_id IS NULL",
                         (analysis_result_id, merged["id"]),
                     )
+
+
+def resolve_llm_if_case(llm_out: dict[str, Any]) -> int:
+    """Derive the IfCase flag from a stored ``llm_output`` payload.
+
+    Prefers the value persisted by the LLM worker, and falls back to deriving it
+    from the LLM level so rows written before the field existed still expose a
+    correct flag through the API. It is always based on the LLM text level, not
+    on the fused overall level.
+    """
+
+    value = llm_out.get("IfCase")
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return 1 if value == 1 else 0
+    if isinstance(value, str) and value.strip().isdigit():
+        return 1 if int(value.strip()) == 1 else 0
+
+    level = llm_out.get("level")
+    if isinstance(level, str) and level.strip().isdigit():
+        level = int(level.strip())
+    return 1 if level == 1 else 0
+
+
+def resolve_llm_case_reason(llm_out: dict[str, Any]) -> str | None:
+    """Derive CaseReason from a stored ``llm_output`` payload.
+
+    Prefers the persisted value, and falls back to joining every
+    ``caseTypeDetails[].reason`` with the Chinese semicolon, matching the shape
+    written by ``LlmAnalysisOutput.case_reason``.
+    """
+
+    value = llm_out.get("CaseReason")
+    if isinstance(value, str) and value.strip():
+        return value
+
+    details = llm_out.get("caseTypeDetails")
+    if not isinstance(details, list):
+        return None
+    reasons = [
+        str(item["reason"]).strip()
+        for item in details
+        if isinstance(item, dict) and str(item.get("reason") or "").strip()
+    ]
+    return CASE_REASON_SEPARATOR.join(reasons) if reasons else None
 
 
 def _build_summary(

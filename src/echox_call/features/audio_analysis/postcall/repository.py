@@ -14,6 +14,8 @@ from echox_call.features.audio_analysis.postcall.llm_repository import (
     PostcallLlmJobRepository,
     _build_summary,
     _select_overall_attention_level,
+    resolve_llm_case_reason,
+    resolve_llm_if_case,
 )
 from echox_call.features.audio_analysis.postcall.schemas import (
     ATTENTION_LEVEL_NAMES,
@@ -704,6 +706,10 @@ class PostcallJobRepository:
                     raise PostcallResultContractError(
                         f"stored API result payload is invalid for jobId {job_id}"
                     ) from exc
+            payload = _backfill_llm_derived_fields(
+                payload,
+                row["llm_output"] if isinstance(row["llm_output"], dict) else {},
+            )
             try:
                 return PostcallJobResultData.model_validate(payload)
             except ValidationError as exc:
@@ -1089,6 +1095,37 @@ def _build_audio_analysis_data(
     }
 
 
+def _backfill_llm_derived_fields(
+    payload: dict[str, Any],
+    llm_out: dict[str, Any],
+) -> dict[str, Any]:
+    """Add IfCase / CaseReason to payloads stored before the fields existed.
+
+    Results written by older versions live in ``postcall_analysis_results``
+    without these keys, so they are derived on read from the queue's
+    ``llm_output``. Payloads that already carry the values are returned as-is.
+    """
+
+    overall = payload.get("overallResult")
+    if not isinstance(overall, dict):
+        return payload
+    if not llm_out:
+        return payload
+    if "IfCase" in overall and overall.get("CaseReason") is not None:
+        return payload
+
+    patched_overall = dict(overall)
+    patched_overall.setdefault("IfCase", resolve_llm_if_case(llm_out))
+    if patched_overall.get("CaseReason") is None:
+        reason = resolve_llm_case_reason(llm_out)
+        if reason is not None:
+            patched_overall["CaseReason"] = reason
+
+    patched = dict(payload)
+    patched["overallResult"] = patched_overall
+    return patched
+
+
 def _build_partial_overall_result(row: Any) -> OverallResult | None:
     audio_data = row["audio_analysis_data"] if isinstance(row["audio_analysis_data"], dict) else {}
     llm_out = row["llm_output"] if isinstance(row["llm_output"], dict) else {}
@@ -1185,6 +1222,8 @@ def _build_llm_partial_overall_result(
     return OverallResult(
         level=level,
         levelName=level_name,
+        IfCase=resolve_llm_if_case(llm_out),
+        CaseReason=resolve_llm_case_reason(llm_out),
         summary=_build_summary(
             llm_out,
             level_name,
