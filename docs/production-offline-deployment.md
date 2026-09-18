@@ -7,6 +7,8 @@
 ```text
 8000  API 服务，正式实时音频接收接口也在这个端口
 8002  控制台对外端口
+8010  舆情研判接口
+8012  标注平台网关
 5432  PostgreSQL 对外端口
 ```
 
@@ -29,10 +31,13 @@ images/echox-call-stream-cuda.tar.gz
 images/postgres16.tar.gz
 project/echox-call-project-with-models.tar.gz
 deploy.sh
+update.sh
 README-production-offline.md
 MANIFEST.txt
 SHA256SUMS
 ```
+
+`deploy.sh` 用于全新安装，`update.sh` 用于已在运行的现场做增量更新（见第 6 节）。
 
 ## 3. 一键部署
 
@@ -70,7 +75,7 @@ sudo ./deploy.sh --install-dir /data/zhuxx/echox-call --no-start
 4. 生成 .env.docker
 5. 启动 postgres
 6. 执行数据库迁移
-7. 启动 api、worker、realtime-worker、console
+7. 启动 api、worker、audio-cleanup、realtime-worker、console、opinion-risk-api、annotation-gateway
 ```
 
 默认不启动 `llm-worker`，因为生产环境通常需要先确认 LLM 地址和密钥。需要一起启动时：
@@ -157,6 +162,14 @@ GET  /health
 
 控制台服务，默认从宿主机 `8002` 访问。
 
+`opinion-risk-api`
+
+舆情研判接口，默认端口 `8010`，配置项 `OPINION_RISK_PORT`。
+
+`annotation-gateway`
+
+标注平台网关，默认端口 `8012`，把 `ANNOTATION_GATEWAY_PREFIX`（默认 `/landa/web/biaozhu`）反代到控制台，依赖 `console` 健康后再启动。超时由 `ANNOTATION_GATEWAY_TIMEOUT_SECONDS` 控制，默认 120 秒。改过前缀或目标地址后需要 `up -d --force-recreate annotation-gateway` 才能生效。
+
 ## 6. 启动和维护命令
 
 以下命令都在安装目录执行：
@@ -188,7 +201,15 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 重启服务：
 
 ```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d api worker realtime-worker console
+docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml restart api worker realtime-worker console
+```
+
+这里必须用 `restart`，不要用 `up -d`。业务代码是从宿主机 `src/` 挂载进去的，Python 不会热加载；而配置没有变化时 `up -d` 是空操作，容器不会被重建也不会重启，代码更新等于没生效。
+
+反过来，`restart` 不会重新读取 `.env.docker`。改过 `.env.docker` 之后要重建容器：
+
+```bash
+docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d --force-recreate api worker realtime-worker console
 ```
 
 启动 LLM worker：
@@ -196,6 +217,41 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 ```bash
 docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d llm-worker
 ```
+
+重启 worker 时正在处理的任务不会丢：任务行还在数据库里，等 `locked_until` 过期后会由 `recover_expired_jobs()` 回收重排。LLM worker 锁默认 120 秒，音频 worker 默认 600 秒，回收会消耗一次重试（最多 3 次），所以不要连续快速重启。
+
+### 增量更新代码
+
+镜像里只有 Python/CUDA 运行时和依赖（`Dockerfile.cuda` 只 `COPY requirements.txt`），业务代码是通过 compose 的 `../../src:/app/src:ro` 从宿主机挂载的。所以**只改代码时不需要重建镜像、也不需要往离线网内传镜像包**，同步 `src/` 再重启容器即可。
+
+在外网打包增量代码：
+
+```bash
+git archive --format=tar HEAD src | gzip -9 > echox-src-<提交号>.tar.gz
+sha256sum echox-src-<提交号>.tar.gz
+```
+
+把该 tar.gz 和 `update.sh` 带进离线网，然后在安装目录执行：
+
+```bash
+cd /opt/echox-call
+./deploy/offline/update.sh --archive /root/echox-src-<提交号>.tar.gz --dry-run   # 先确认动作
+./deploy/offline/update.sh --archive /root/echox-src-<提交号>.tar.gz             # 执行
+```
+
+脚本会备份 `src`（默认保留 3 份）→ 原地覆盖 → 重启服务，最后打印容器状态。
+
+注意事项：
+
+```text
+1. 必须原地覆盖，不要删掉 src 目录再解压。目录被替换后 inode 变化，运行中的容器仍读到旧内容，
+   直到重启才恢复——会出现「宿主机已更新、容器里还是旧代码」的假更新。
+2. 只改代码用 restart；改了 .env.docker 用 --recreate。
+3. 只有 requirements.txt 变化时才需要重建镜像并重新传输镜像包。
+4. 回滚：ls -d src.bak.* 找到备份目录，拷回 src 后重启服务。
+```
+
+常用参数：`--source DIR`（直接用本地目录）、`--paths`（只更新指定子路径）、`--services all`、`--migrate`、`--keep N`、`--no-restart`。
 
 ## 7. 开启多个 worker
 
@@ -290,5 +346,7 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 ```text
 8000/tcp
 8002/tcp
+8010/tcp 如果需要外部调用舆情研判接口
+8012/tcp 如果需要外部访问标注平台
 5432/tcp 如果需要外部访问数据库
 ```

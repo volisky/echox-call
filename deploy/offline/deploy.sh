@@ -177,7 +177,7 @@ if [[ "$START_SERVICES" -eq 0 ]]; then
   echo "  cd $INSTALL_DIR"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d postgres"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} --profile tools run --rm migrate"
-  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker audio-cleanup realtime-worker console"
+  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker audio-cleanup realtime-worker console opinion-risk-api annotation-gateway"
   exit 0
 fi
 
@@ -188,7 +188,7 @@ echo "running migrations..."
 $COMPOSE "${COMPOSE_ARGS[@]}" --profile tools run --rm migrate
 
 echo "starting application services..."
-SERVICES=(api worker audio-cleanup realtime-worker console)
+SERVICES=(api worker audio-cleanup realtime-worker console opinion-risk-api annotation-gateway)
 if [[ "$START_LLM_WORKER" == "1" ]]; then
   SERVICES+=(llm-worker)
 fi

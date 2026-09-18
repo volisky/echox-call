@@ -19,7 +19,7 @@ INSTALL_DIR="/opt/echox-call"
 SOURCE_DIR=""
 ARCHIVE=""
 PATHS="src"
-SERVICES="api worker llm-worker console"
+SERVICES="all"
 RUN_MIGRATE=0
 RECREATE=0
 DO_RESTART=1
@@ -57,8 +57,10 @@ Options:
   --install-dir DIR  安装目录。默认 /opt/echox-call
   --paths "src ..."  要同步的顶层目录，空格分隔。默认 "src"
                      改到 config/ 就写 "src config"，改到迁移就写 "src migrations"
-  --services "..."   更新后重启的服务，空格分隔。默认 "api worker llm-worker console"
-                     填 all 表示除 postgres/migrate 外的全部业务容器
+  --services "..."   更新后重启的服务，空格分隔。默认 all
+                     默认值是 all：从 compose 文件实时解析全部业务服务（排除 postgres/
+                     migrate），这样以后新增服务也不会漏重启。没有容器的服务会被跳过，
+                     不会被意外创建；只想重启个别服务时显式传服务名
   --migrate          同步后执行数据库迁移（migrations/ 有变化时用）
   --recreate         用 up -d --force-recreate 重建容器。改了 .env.docker 时必须用
   --no-restart       只同步代码，不重启任何容器
@@ -237,7 +239,11 @@ sync_one() {
   run mkdir -p "$dest"
 
   if command -v rsync >/dev/null 2>&1; then
-    run rsync -a --delete \
+    # 用 --checksum 按内容比对，而不是默认的“大小 + 秒级 mtime”。
+    # 默认快速判定会在“文件大小相同且 mtime 落在同一秒”时直接跳过，导致代码看起来
+    # 同步过了、实际仍是旧内容——部署脚本不能接受这种静默漏更。src 只有 MB 级，
+    # 全量校验的代价可以忽略。
+    run rsync -a -c --delete \
       --exclude '__pycache__/' --exclude '*.pyc' \
       "$src"/ "$dest"/
   else
@@ -278,14 +284,27 @@ restart_services() {
     return 0
   fi
 
-  log "重启容器（进程重生，加载新代码）"
-  # restart 只重启已有容器；容器不存在时回退到 up -d
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] %s %s restart %s\n' "$COMPOSE" "${COMPOSE_ARGS[*]}" "${svc[*]}"
-  elif ! $COMPOSE "${COMPOSE_ARGS[@]}" restart "${svc[@]}"; then
-    warn "restart 失败，改用 up -d 启动"
-    $COMPOSE "${COMPOSE_ARGS[@]}" up -d "${svc[@]}"
+  # 只重启已存在的容器。没有容器的服务（例如未启用的 llm-worker）跳过去，不能在这一步
+  # 被顺手创建出来——那会意外开启一个运维方有意没启的进程。
+  local -a present=() missing=()
+  local s
+  for s in "${svc[@]}"; do
+    if [[ -n "$($COMPOSE "${COMPOSE_ARGS[@]}" ps -q "$s" 2>/dev/null)" ]]; then
+      present+=("$s")
+    else
+      missing+=("$s")
+    fi
+  done
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    warn "以下服务当前没有容器，跳过（需要时自行 up -d）：${missing[*]}"
   fi
+  [[ "${#present[@]}" -gt 0 ]] || {
+    warn "没有可重启的容器，已跳过重启"
+    return 0
+  }
+
+  log "重启容器（进程重生，加载新代码）"
+  run $COMPOSE "${COMPOSE_ARGS[@]}" restart "${present[@]}"
 }
 
 # ---------------------------------------------------------------- 6. 迁移
@@ -328,14 +347,14 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
   cd $INSTALL_DIR && $COMPOSE ${COMPOSE_ARGS[*]} ps
 
   # 2) 看容器有没有报错
-  $COMPOSE ${COMPOSE_ARGS[*]} logs --tail=50 api worker llm-worker
+  $COMPOSE ${COMPOSE_ARGS[*]} logs --tail=50 api worker realtime-worker
 
   # 3) 打一个已完成案件，确认返回里出现新字段（本次为 IfCase / CaseReason）
   curl -s -H "X-API-Key: <你的key>" http://127.0.0.1:8000/api/v1/postcall/jobs/<jobId>
 
-回滚：把备份目录拷回去再重启即可。
+回滚：同样要原地覆盖，不能删掉 src 再拷回来（换目录会让运行中的容器继续读旧内容）。
   ls -d $INSTALL_DIR/src.bak.*
-  rm -rf $INSTALL_DIR/src && cp -a $INSTALL_DIR/src.bak.<时间戳> $INSTALL_DIR/src
-  $COMPOSE ${COMPOSE_ARGS[*]} restart api worker llm-worker console
+  rsync -a -c --delete $INSTALL_DIR/src.bak.<时间戳>/ $INSTALL_DIR/src/
+  $COMPOSE ${COMPOSE_ARGS[*]} restart api worker realtime-worker console
 EOF
 fi

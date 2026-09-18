@@ -18,7 +18,8 @@ Creates an offline production bundle containing:
   - echox-call:stream-cuda image
   - postgres:16 image
   - source code, config, docs, migrations, third_party, models
-  - one-step deploy.sh
+  - one-step deploy.sh for fresh installs
+  - update.sh for incremental code-only updates on a running site
   - production offline deployment guide
 
 Options:
@@ -121,15 +122,28 @@ tar \
   "${PROJECT_ITEMS[@]}"
 
 cp deploy/offline/deploy.sh "$OUT_DIR/deploy.sh"
+cp deploy/offline/update.sh "$OUT_DIR/update.sh"
 cp docs/production-offline-deployment.md "$OUT_DIR/README-production-offline.md"
-chmod +x "$OUT_DIR/deploy.sh"
+chmod +x "$OUT_DIR/deploy.sh" "$OUT_DIR/update.sh"
 
 cat > "$OUT_DIR/MANIFEST.txt" <<EOF
 Release: $RELEASE_NAME
 CreatedAt: $(date -Is)
+GitCommit: $(git rev-parse HEAD 2>/dev/null || echo unknown)
+GitBranch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
 Images:
   echox-call:stream-cuda
   postgres:16
+Contents:
+  images/echox-call-stream-cuda.tar.gz   application image (deps only, code is mounted)
+  images/postgres16.tar.gz               database image
+  project/echox-call-project-with-models.tar.gz
+                                         code, config, migrations, docs, scripts, models
+  deploy.sh                              fresh install
+  update.sh                              incremental code-only update
+  README-production-offline.md           deployment guide
+InstallDir:
+  default /opt/echox-call
 Ports:
   API / realtime push: 8000
   Console: 8002
@@ -138,7 +152,7 @@ EOF
 
 (
   cd "$OUT_DIR"
-  sha256sum images/*.tar.gz project/*.tar.gz deploy.sh README-production-offline.md MANIFEST.txt > SHA256SUMS
+  sha256sum images/*.tar.gz project/*.tar.gz deploy.sh update.sh README-production-offline.md MANIFEST.txt > SHA256SUMS
 )
 
 echo "creating outer archive..."
