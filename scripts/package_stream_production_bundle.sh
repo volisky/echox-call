@@ -147,6 +147,8 @@ InstallDir:
 Ports:
   API / realtime push: 8000
   Console: 8002
+  Opinion risk API: 8010
+  Annotation gateway: 8012
   PostgreSQL: 5432
 EOF
 
