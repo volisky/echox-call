@@ -32,12 +32,13 @@ images/postgres16.tar.gz
 project/echox-call-project-with-models.tar.gz
 deploy.sh
 update.sh
+check_update.sh
 README-production-offline.md
 MANIFEST.txt
 SHA256SUMS
 ```
 
-`deploy.sh` 用于全新安装，`update.sh` 用于已在运行的现场做增量更新（见第 6 节）。
+`deploy.sh` 用于全新安装，`update.sh` 用于已在运行的现场做增量更新，`check_update.sh` 用于更新前的只读预检（见第 6 节）。
 
 ## 3. 一键部署
 
@@ -252,6 +253,34 @@ cd /opt/echox-call
 ```
 
 常用参数：`--source DIR`（直接用本地目录）、`--paths`（只更新指定子路径）、`--services all`、`--migrate`、`--keep N`、`--no-restart`。
+
+### 更新前预检
+
+执行 `update.sh` 之前，先用 `check_update.sh` 确认现场能否替换为新版本。预检是只读的：不改动安装目录，不重启容器，镜像内检查使用 `docker run --rm --network none` 的一次性容器。
+
+为了让预检能对比依赖、迁移、配置和服务定义，归档里除 `src` 外一并带上这些文件。`update.sh` 只同步 `--paths` 指定的目录，多带不影响更新：
+
+```bash
+tar --exclude='__pycache__' --exclude='*.pyc' -czf echox-update-<提交号>.tar.gz \
+  src migrations config requirements.txt deploy/offline/docker-compose.production.yml
+```
+
+```bash
+cd /opt/echox-call
+./deploy/offline/check_update.sh --archive /root/echox-update-<提交号>.tar.gz
+```
+
+检查内容：
+
+```text
+1. 安装目录、compose 文件、.env.docker、docker / compose / rsync 是否就绪
+2. 新旧文件差异（新增 / 修改 / 将被删除）
+3. requirements.txt、migrations/、config/、compose 文件是否有变化
+4. 磁盘空间是否足够备份和同步
+5. 在现有镜像里检查新代码：语法、各服务入口模块能否导入、依赖版本是否满足
+```
+
+退出码 0 表示可以更新，并在结尾打印对应的 `update.sh` 命令（需要迁移时已带上 `--paths "src migrations" --migrate`）；退出码 1 表示存在阻断项，例如现有镜像不满足新依赖、新代码无法导入、磁盘空间不足。`[WARN]` 项不阻断更新，但需要先人工确认。
 
 ## 7. 开启多个 worker
 

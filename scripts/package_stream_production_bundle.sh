@@ -123,8 +123,9 @@ tar \
 
 cp deploy/offline/deploy.sh "$OUT_DIR/deploy.sh"
 cp deploy/offline/update.sh "$OUT_DIR/update.sh"
+cp deploy/offline/check_update.sh "$OUT_DIR/check_update.sh"
 cp docs/production-offline-deployment.md "$OUT_DIR/README-production-offline.md"
-chmod +x "$OUT_DIR/deploy.sh" "$OUT_DIR/update.sh"
+chmod +x "$OUT_DIR/deploy.sh" "$OUT_DIR/update.sh" "$OUT_DIR/check_update.sh"
 
 cat > "$OUT_DIR/MANIFEST.txt" <<EOF
 Release: $RELEASE_NAME
@@ -141,6 +142,7 @@ Contents:
                                          code, config, migrations, docs, scripts, models
   deploy.sh                              fresh install
   update.sh                              incremental code-only update
+  check_update.sh                        read-only pre-check before update.sh
   README-production-offline.md           deployment guide
 InstallDir:
   default /opt/echox-call
@@ -154,7 +156,7 @@ EOF
 
 (
   cd "$OUT_DIR"
-  sha256sum images/*.tar.gz project/*.tar.gz deploy.sh update.sh README-production-offline.md MANIFEST.txt > SHA256SUMS
+  sha256sum images/*.tar.gz project/*.tar.gz deploy.sh update.sh check_update.sh README-production-offline.md MANIFEST.txt > SHA256SUMS
 )
 
 echo "creating outer archive..."
