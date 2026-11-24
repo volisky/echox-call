@@ -147,7 +147,7 @@ Contents:
 InstallDir:
   default /opt/echox-call
 Ports:
-  API / realtime push: 8000
+  API: 8000
   Console: 8002
   Opinion risk API: 8010
   Annotation gateway: 8012

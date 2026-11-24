@@ -89,8 +89,6 @@ class PostcallWorker:
             job = self.repository.claim_next_job(
                 worker_id=self.worker_id,
                 lock_seconds=self.settings.lock_seconds,
-                skip_call_id_jobs=self.settings.skip_call_id_jobs,
-                call_id_fallback_after_seconds=self.settings.call_id_fallback_after_seconds,
             )
             if job is None:
                 break

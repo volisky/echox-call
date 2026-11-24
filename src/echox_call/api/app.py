@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from echox_call.api.gateway import router as gateway_router
 from echox_call.api.responses import api_success, register_exception_handlers
 from echox_call.api.v1.router import router as api_v1_router
 
@@ -19,7 +18,6 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_v1_router, prefix="/api/v1")
-    app.include_router(gateway_router, prefix="/gateway", tags=["gateway"])
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, object]:

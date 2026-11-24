@@ -28,10 +28,6 @@ class LlmWorkerConfigError(RuntimeError):
     """Raised when LLM worker configuration is missing or invalid."""
 
 
-class RealtimeWorkerConfigError(RuntimeError):
-    """Raised when realtime stream worker configuration is invalid."""
-
-
 @dataclass(frozen=True)
 class DatabaseSettings:
     conninfo: str
@@ -78,19 +74,6 @@ class PostcallWorkerSettings:
     attention_rules_path: Path
     attention_rule_whitelist_path: Path
     whitelist_attention_rules_path: Path
-    skip_call_id_jobs: bool
-    call_id_fallback_after_seconds: int
-
-
-@dataclass(frozen=True)
-class RealtimeWorkerSettings:
-    storage_dir: Path
-    window_sec: int
-    tail_min_sec: int
-    idle_end_seconds: int
-    min_duration_sec: int
-    batch_size: int
-    sleep_seconds: float
 
 
 def _load_dotenv_if_available() -> None:
@@ -134,13 +117,6 @@ def _env_optional_int(env: Mapping[str, str], name: str, default: int | None) ->
         raise DatabaseConfigError(f"{name} must be greater than 0, got {value}")
 
     return value
-
-
-def _env_bool(env: Mapping[str, str], name: str, default: bool) -> bool:
-    raw_value = env.get(name)
-    if raw_value is None or raw_value == "":
-        return default
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_choice(
@@ -307,12 +283,6 @@ def load_postcall_worker_settings(
             "POSTCALL_WHITELIST_ATTENTION_RULES_PATH",
             "config/postcall_attention_rules_whitelist.yaml",
         ),
-        skip_call_id_jobs=_env_bool(source, "POSTCALL_WORKER_SKIP_CALL_ID_JOBS", False),
-        call_id_fallback_after_seconds=_env_int(
-            source,
-            "POSTCALL_WORKER_CALL_ID_FALLBACK_AFTER_SECONDS",
-            300,
-        ),
     )
 
 
@@ -345,35 +315,4 @@ def load_llm_worker_settings(
         lock_seconds=_env_int(source, "LLM_WORKER_LOCK_SECONDS", 120),
         retry_base_delay_seconds=_env_int(source, "LLM_WORKER_RETRY_BASE_DELAY_SECONDS", 30),
         retry_max_delay_seconds=_env_int(source, "LLM_WORKER_RETRY_MAX_DELAY_SECONDS", 300),
-    )
-
-
-def load_realtime_worker_settings(
-    env: Mapping[str, str] | None = None,
-) -> RealtimeWorkerSettings:
-    """Load realtime audio stream settings."""
-
-    _load_dotenv_if_available()
-    source = os.environ if env is None else env
-    window_sec = _env_int(source, "POSTCALL_REALTIME_WINDOW_SEC", 10)
-    tail_min_sec = _env_int(source, "POSTCALL_REALTIME_TAIL_MIN_SEC", 3)
-    if tail_min_sec > window_sec:
-        raise RealtimeWorkerConfigError(
-            "POSTCALL_REALTIME_TAIL_MIN_SEC must be less than or equal to "
-            "POSTCALL_REALTIME_WINDOW_SEC"
-        )
-    idle_end_seconds = _env_int(source, "POSTCALL_REALTIME_IDLE_END_SECONDS", 60)
-    min_duration_sec = _env_int(source, "POSTCALL_REALTIME_MIN_DURATION_SEC", tail_min_sec)
-    if idle_end_seconds < 0:
-        raise RealtimeWorkerConfigError("POSTCALL_REALTIME_IDLE_END_SECONDS must be >= 0")
-    if min_duration_sec < 0:
-        raise RealtimeWorkerConfigError("POSTCALL_REALTIME_MIN_DURATION_SEC must be >= 0")
-    return RealtimeWorkerSettings(
-        storage_dir=_env_path(source, "POSTCALL_REALTIME_STORAGE_DIR", "data/realtime"),
-        window_sec=window_sec,
-        tail_min_sec=tail_min_sec,
-        idle_end_seconds=idle_end_seconds,
-        min_duration_sec=min_duration_sec,
-        batch_size=_env_int(source, "POSTCALL_REALTIME_WORKER_BATCH_SIZE", 1),
-        sleep_seconds=float(source.get("POSTCALL_REALTIME_WORKER_SLEEP_SECONDS", "2.0") or "2.0"),
     )

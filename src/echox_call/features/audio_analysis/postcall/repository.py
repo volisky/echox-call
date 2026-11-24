@@ -18,7 +18,6 @@ from echox_call.features.audio_analysis.postcall.llm_repository import (
     resolve_llm_if_case,
 )
 from echox_call.features.audio_analysis.postcall.schemas import (
-    ATTENTION_LEVEL_NAMES,
     CreatePostcallJobRequest,
     InputSnapshot,
     OverallResult,
@@ -223,35 +222,6 @@ WITH candidate AS (
       AND next_run_at <= now()
       AND attempt_count < max_attempts
       AND (locked_until IS NULL OR locked_until < now())
-      AND (
-          %(skip_call_id_jobs)s = false
-          OR call_id IS NULL
-          OR (
-              created_at <= now() - make_interval(secs => %(call_id_fallback_after_seconds)s)
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM postcall_realtime_streams AS stream
-                  WHERE stream.call_id = postcall_jobs.call_id
-              )
-          )
-          OR EXISTS (
-              SELECT 1
-              FROM postcall_realtime_streams AS stream
-              WHERE stream.call_id = postcall_jobs.call_id
-                AND (
-                    stream.state = 'failed'
-                    OR (
-                        stream.state = 'finalized'
-                        AND NOT EXISTS (
-                            SELECT 1
-                            FROM postcall_realtime_windows AS win
-                            WHERE win.stream_id = stream.id
-                              AND win.state = 'completed'
-                        )
-                    )
-                )
-          )
-      )
     ORDER BY priority DESC, next_run_at ASC, created_at ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -581,29 +551,6 @@ RETURNING id
 """
 
 
-SELECT_JOB_BY_CALL_ID_SQL = """
-SELECT
-    id,
-    job_id,
-    jjdh,
-    call_id,
-    audio_url,
-    bjsj,
-    bjdh,
-    bjrmc,
-    lxdh,
-    raw_payload,
-    callback_url,
-    attempt_count,
-    max_attempts,
-    duplicate_count
-FROM postcall_jobs
-WHERE call_id = %s
-ORDER BY created_at DESC
-LIMIT 1
-"""
-
-
 class PostcallJobRepositoryError(RuntimeError):
     """Raised when a postcall job cannot be persisted."""
 
@@ -826,8 +773,6 @@ class PostcallJobRepository:
         *,
         worker_id: str,
         lock_seconds: int,
-        skip_call_id_jobs: bool = False,
-        call_id_fallback_after_seconds: int = 300,
     ) -> ClaimedPostcallJob | None:
         with connect(autocommit=False) as conn:
             with conn.transaction():
@@ -836,8 +781,6 @@ class PostcallJobRepository:
                     {
                         "worker_id": worker_id,
                         "lock_seconds": lock_seconds,
-                        "skip_call_id_jobs": skip_call_id_jobs,
-                        "call_id_fallback_after_seconds": call_id_fallback_after_seconds,
                     },
                 ).fetchone()
         if row is None:
@@ -931,28 +874,6 @@ class PostcallJobRepository:
             error_message=error_message,
             retryable=False,
             retry_delay_seconds=0,
-        )
-
-    def get_claimed_job_by_call_id(self, call_id: str) -> ClaimedPostcallJob | None:
-        with connect() as conn:
-            row = conn.execute(SELECT_JOB_BY_CALL_ID_SQL, (call_id,)).fetchone()
-        if row is None:
-            return None
-        return ClaimedPostcallJob(
-            internal_id=row["id"],
-            job_id=row["job_id"],
-            jjdh=row["jjdh"],
-            audio_url=row["audio_url"],
-            bjsj=row["bjsj"],
-            callback_url=row["callback_url"],
-            attempt_count=row["attempt_count"],
-            max_attempts=row["max_attempts"],
-            duplicate_count=row["duplicate_count"],
-            call_id=row["call_id"],
-            bjdh=row["bjdh"],
-            bjrmc=row["bjrmc"],
-            lxdh=row["lxdh"],
-            raw_payload=row["raw_payload"] if isinstance(row["raw_payload"], dict) else {},
         )
 
     def insert_audio_asset(
@@ -1133,14 +1054,10 @@ def _build_partial_overall_result(row: Any) -> OverallResult | None:
 
     audio_completed = row["audio_completed_at"] is not None
     llm_completed = row["llm_state"] == "completed" and bool(llm_out)
-    realtime_voice_result = None
-    if not audio_completed and row.get("call_id"):
-        realtime_voice_result = _build_realtime_voice_result(row["call_id"])
     if not audio_completed and not llm_completed:
-        if realtime_voice_result is None:
-            return None
+        return None
 
-    voice_result = _build_partial_voice_result(audio_data) if audio_completed else realtime_voice_result
+    voice_result = _build_partial_voice_result(audio_data) if audio_completed else None
     if voice_result is None and not llm_completed:
         return None
 
@@ -1253,61 +1170,6 @@ def _build_voice_partial_summary(voice_result: VoiceResult) -> list[str]:
             ]
 
     return [f"音频识别：综合判定为“{voice_result.levelName}”。"]
-
-
-def _build_realtime_voice_result(call_id: str) -> VoiceResult | None:
-    with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                window_index,
-                start_sec,
-                end_sec,
-                attention_level,
-                attention_level_name,
-                review_segments
-            FROM postcall_realtime_windows AS win
-            JOIN postcall_realtime_streams AS stream ON stream.id = win.stream_id
-            WHERE stream.call_id = %s
-              AND win.state = 'completed'
-              AND win.attention_level IS NOT NULL
-            ORDER BY win.start_sec ASC, win.end_sec ASC
-            """,
-            (call_id,),
-        ).fetchall()
-    if not rows:
-        return None
-
-    levels = [row["attention_level"] for row in rows if row["attention_level"] in {1, 2, 3}]
-    if not levels:
-        return None
-    level = min(levels)
-    level_name = ATTENTION_LEVEL_NAMES[level]
-    review_segments: list[PostcallReviewSegment] | None = None
-    if level in {1, 2}:
-        raw_segments: list[dict[str, Any]] = []
-        for row in rows:
-            if row["attention_level"] not in {1, 2}:
-                continue
-            window_segments = row["review_segments"] if isinstance(row["review_segments"], list) else []
-            for segment in window_segments:
-                if isinstance(segment, dict):
-                    raw_segments.append(segment)
-        review_segments = [
-            PostcallReviewSegment(
-                startSec=float(segment["startSec"]),
-                endSec=float(segment["endSec"]),
-                result=segment.get("result") or segment.get("title") or "实时音频窗口命中关注线索",
-            )
-            for segment in raw_segments
-            if "startSec" in segment and "endSec" in segment
-        ] or None
-
-    return VoiceResult(
-        level=level,
-        levelName=level_name,
-        reviewSegments=review_segments,
-    )
 
 
 def _timeline_payload_from_row(row: Any) -> dict[str, Any]:

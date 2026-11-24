@@ -537,8 +537,14 @@ if [[ "$CONTAINER_READY" -eq 1 ]]; then
   build_container_args
 
   # 6.1 语法 + 入口模块导入。入口模块取自新旧 compose 文件中各服务的启动命令。
+  # 已退役服务的入口（如旧版 realtime-worker）被定向排除——它们在新版中已不存在，
+  # 属于本次升级刻意移除的能力，不算回归。其他现场定制入口照常校验。
+  retired_entry_modules=(echox_call.cli.realtime_worker)
   entry_modules="$(cat "$COMPOSE_FILE" "$SRC_ROOT/$COMPOSE_FILE_REL" 2>/dev/null |
     grep -oE 'echox_call\.cli\.[A-Za-z0-9_]+' | sort -u | tr '\n' ' ' || true)"
+  for retired in "${retired_entry_modules[@]}"; do
+    entry_modules="$(tr ' ' '\n' <<<"$entry_modules" | grep -vxF "$retired" | tr '\n' ' ')"
+  done
   cat >"$TMP_DIR/check_code.py" <<'PYTHON_EOF'
 import importlib
 import pathlib

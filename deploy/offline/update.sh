@@ -247,12 +247,25 @@ sync_one() {
       --exclude '__pycache__/' --exclude '*.pyc' \
       "$src"/ "$dest"/
   else
-    warn "未安装 rsync，回退为 tar 覆盖（不会删除目标目录里已废弃的文件）"
+    warn "未安装 rsync，回退为 tar 覆盖（不会自动删除目标目录里已废弃的文件）"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf '[dry-run] tar 覆盖 %s -> %s\n' "$src" "$dest"
     else
       (cd "$src" && tar -cf - --exclude='__pycache__' --exclude='*.pyc' .) |
         (cd "$dest" && tar -xf - --overwrite)
+    fi
+    # tar 覆盖不会删文件，但本版本明确退役的模块必须一并清掉，
+    # 否则旧代码残留会被入口模块继续拉起。
+    if [[ "$name" == "src" ]]; then
+      local rel
+      for rel in "${REMOVED_SRC_FILES[@]}"; do
+        # 只在来源确实不含该文件时删除：旧代码回滚包仍带着这些文件，
+        # tar 已经把它们重新复制回来，不能再删
+        if [[ ! -f "$src/$rel" && -f "$dest/$rel" ]]; then
+          log "清理已退役文件 $rel"
+          run rm -f "$dest/$rel"
+        fi
+      done
     fi
   fi
   prune_backups "$dest"
@@ -266,6 +279,266 @@ resolve_services() {
   else
     printf '%s' "$SERVICES"
   fi
+}
+
+# ---------------------------------------------------------------- 退役服务
+# 老版本安装里 realtime-worker 仍在 compose 中定义并随 restart 存活。离线升级只同步
+# src/，新代码已不含实时音频实现，继续运行只会 crash-loop。这里先做针对性退役：
+# 1) 服务是否定义以 `compose config --services` 为准，不猜缩进和注释写法
+# 2) 容器按 project + service 标签初筛，再按 config_files 逗号列表精确匹配本
+#    安装 compose 文件后定向删除，不用 compose rm，绝不误删其他项目/安装
+# 3) 从现场 compose 文件删掉该服务块后用候选文件验证，防止后续 up -d 把它复活
+# 任何一步无法安全完成都会报错退出并保留备份，绝不静默成功。
+RETIRE_BACKUP=""
+
+REMOVED_IDS=""
+
+# 生效的 compose 项目名，按可靠性逐层探测：
+#   a) `config --format json` 顶层 name（compose v2）
+#   b) 普通 `config` 输出的 name:（v1 没有该字段时为空）
+#   c) COMPOSE_PROJECT_NAME 环境变量（v1 用户显式指定）
+#   d) 现有业务容器 inspect 的 project 标签（v1 无 name 字段时的可靠回退；
+#      compose ps 本身只列本项目容器，拿第一个的标签即生效项目名）
+# 探测仅在有候选容器时才需要：没有候选就没有容器可删，不必求项目名。
+# 有候选而所有途径都拿不到项目名时明确失败，否则可能误删同名文件不同
+# -p 的另一套安装。
+EFFECTIVE_PROJECT_NAME=""
+effective_project_name() {
+  if [[ -z "$EFFECTIVE_PROJECT_NAME" ]]; then
+    local json cid
+    json="$($COMPOSE "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null || true)"
+    if [[ -n "$json" ]]; then
+      EFFECTIVE_PROJECT_NAME="$(printf '%s' "$json" |
+        sed -n 's/^  "name": "\([^"]*\)".*/\1/p' | head -1)"
+    fi
+    if [[ -z "$EFFECTIVE_PROJECT_NAME" ]]; then
+      EFFECTIVE_PROJECT_NAME="$($COMPOSE "${COMPOSE_ARGS[@]}" config 2>/dev/null |
+        sed -n 's/^name: *//p' | head -1)"
+    fi
+    if [[ -z "$EFFECTIVE_PROJECT_NAME" && -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+      EFFECTIVE_PROJECT_NAME="$COMPOSE_PROJECT_NAME"
+    fi
+    if [[ -z "$EFFECTIVE_PROJECT_NAME" ]]; then
+      cid="$($COMPOSE "${COMPOSE_ARGS[@]}" ps -aq 2>/dev/null | head -1 || true)"
+      if [[ -n "$cid" ]]; then
+        EFFECTIVE_PROJECT_NAME="$(docker inspect \
+          --format '{{index .Config.Labels "com.docker.compose.project"}}' \
+          "$cid" 2>/dev/null || true)"
+      fi
+    fi
+    [[ -n "$EFFECTIVE_PROJECT_NAME" ]] || \
+      fail "无法确定 compose 项目名称，退役中止以保证不误删其他安装"
+  fi
+  printf '%s' "$EFFECTIVE_PROJECT_NAME"
+}
+
+removed_service_containers() {
+  REMOVED_IDS=""
+  local candidates id cfg item proj
+  candidates="$(docker ps -aq \
+    --filter "label=com.docker.compose.service=$1" 2>/dev/null)" || \
+    fail "docker 不可用，无法确认 ${1} 容器状态；请人工检查后重试"
+  [[ -n "$candidates" ]] || return 0
+  # 有候选才需要项目名消歧：同一份 compose 文件可被另一个 -p 项目复用
+  proj="$(effective_project_name)"
+  local keep=""
+  for id in $candidates; do
+    local cp
+    cp="$(docker inspect \
+      --format '{{index .Config.Labels "com.docker.compose.project"}}' \
+      "$id" 2>/dev/null || true)"
+    [[ "$cp" == "$proj" ]] && keep+="$id "
+  done
+  candidates="$keep"
+  [[ -n "$candidates" ]] || return 0
+  # project 名在不同安装目录可能相同，不能单独用来定位；config_files 标签是
+  # 逗号分隔的绝对路径列表，逐项与本安装 compose 文件精确比对。
+  for id in $candidates; do
+    cfg="$(docker inspect \
+      --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' \
+      "$id" 2>/dev/null || true)"
+    [[ -n "$cfg" ]] || continue
+    local IFS=','
+    for item in $cfg; do
+      if [[ "$item" == "$INSTALL_DIR/$COMPOSE_FILE_REL" ]]; then
+        REMOVED_IDS+="$id "
+      fi
+    done
+    IFS=$' \t\n'
+  done
+}
+
+force_remove_service_containers() {
+  local svc="$1" ids
+  removed_service_containers "$svc"
+  ids="$REMOVED_IDS"
+  [[ -n "$ids" ]] || return 0
+  warn "退役服务 ${svc}: 按本安装目录标签定向删除容器"
+  # shellcheck disable=SC2086
+  run docker rm -f $ids || \
+    fail "删除 ${svc} 容器失败（$ids），请人工删除后重试"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    return 0
+  fi
+  removed_service_containers "$svc"
+  [[ -z "$REMOVED_IDS" ]] || \
+    fail "退役服务 ${svc}: 仍有容器残留（$REMOVED_IDS），请人工删除后重试"
+}
+
+restore_compose_backup() {
+  [[ -n "$RETIRE_BACKUP" && -f "$RETIRE_BACKUP" ]] || return 0
+  cp -a "$RETIRE_BACKUP" "$COMPOSE_FILE_REL"
+  warn "已恢复 compose 备份: $RETIRE_BACKUP"
+}
+
+RETIRE_REMOVED_SERVICES=(realtime-worker)
+# 本版本删除的源码文件（tar fallback 同步 src 后定向清理；rsync --delete 已覆盖）
+REMOVED_SRC_FILES=(
+  echox_call/cli/realtime_worker.py
+  echox_call/api/gateway.py
+  echox_call/features/audio_analysis/postcall/realtime.py
+)
+
+path_is_planned() {
+  case " $PATHS " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
+
+compose_service_defined() {
+  $COMPOSE "${COMPOSE_ARGS[@]}" config --services 2>/dev/null | grep -qx "$1"
+}
+
+# 生成"删除指定服务后的候选 compose 文件"，不改动原文件。
+write_strip_candidate() {
+  local svc="$1" file="$2" tmp="$3"
+  grep -qE "^  ${svc}:" "$file" || return 1
+  awk -v svc="$svc" \
+    'BEGIN { skipping = 0 }
+     {
+       if (skipping) {
+         # 遇到下一个两空格缩进键（下一个服务）或非缩进顶层键就恢复输出
+         if ($0 ~ /^  [^ ]/ || $0 ~ /^[^ #]/) skipping = 0
+       }
+       if (!skipping) {
+         if ($0 ~ "^  " svc ":") { skipping = 1; next }
+         print
+       }
+     }' "$file" > "$tmp"
+  return 0
+}
+
+# 验证候选文件：单独解析（替换 -f 参数），必须可解析且不再包含该服务。
+verify_strip_candidate() {
+  local svc="$1" tmp="$2"
+  local -a cand_args=()
+  local i
+  for ((i = 0; i < ${#COMPOSE_ARGS[@]}; i++)); do
+    if [[ "${COMPOSE_ARGS[i]}" == "-f" ]]; then
+      cand_args+=(-f "$tmp")
+      i=$((i + 1))
+    else
+      cand_args+=("${COMPOSE_ARGS[i]}")
+    fi
+  done
+  $COMPOSE "${cand_args[@]}" config --services >/dev/null 2>&1 || return 1
+  ! $COMPOSE "${cand_args[@]}" config --services 2>/dev/null | grep -qx "$svc"
+}
+
+# 同步 src 前的预检：现场 compose 必须可解析，待退役服务的候选文件也必须
+# 可解析且确实删掉该服务；任一失败在改动 src 前就退出，避免半升级。
+preflight_compose() {
+  $COMPOSE "${COMPOSE_ARGS[@]}" config --services >/dev/null 2>&1 || \
+    fail "现有 compose 文件无法解析，未做任何改动；请先修复 $INSTALL_DIR/$COMPOSE_FILE_REL"
+  local svc tmp marker
+  for svc in "${RETIRE_REMOVED_SERVICES[@]}"; do
+    case "$svc" in
+      realtime-worker) marker="echox_call/cli/realtime_worker.py" ;;
+      *) continue ;;
+    esac
+    # 与 retire_removed_services 同一条件：未同步 src 或来源仍含旧模块则无需预检
+    path_is_planned src || continue
+    [[ ! -f "$SRC_ROOT/src/$marker" ]] || continue
+    [[ -d "$SRC_ROOT/src/echox_call" ]] || continue
+    compose_service_defined "$svc" || continue
+    tmp="$(mktemp "${COMPOSE_FILE_REL}.retire-precheck.XXXXXX")"
+    if ! write_strip_candidate "$svc" "$COMPOSE_FILE_REL" "$tmp"; then
+      rm -f "$tmp"
+      fail "compose 定义了 ${svc}，但找不到其服务块（可能被注释或非标准写法），\
+未做任何改动；请手工从 $COMPOSE_FILE_REL 删除后重试"
+    fi
+    if ! verify_strip_candidate "$svc" "$tmp"; then
+      rm -f "$tmp"
+      fail "删除 ${svc} 服务定义后的候选 compose 文件不可用，未做任何改动；请人工处理"
+    fi
+    rm -f "$tmp"
+  done
+  log "compose 预检通过（现有配置可解析）"
+}
+
+strip_compose_service() {
+  local svc="$1" file="$2"
+  RETIRE_BACKUP="${file}.bak.${QSTAMP}"
+  run cp -a "$file" "$RETIRE_BACKUP"
+  log "compose 文件备份: ${RETIRE_BACKUP}"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] 生成并验证删除 %s 服务定义后的候选 compose 文件\n' "$svc"
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp "${file}.retire-candidate.XXXXXX")"
+  if ! write_strip_candidate "$svc" "$file" "$tmp"; then
+    rm -f "$tmp"
+    restore_compose_backup
+    fail "无法从 $file 定位 ${svc} 服务块，已恢复原文件，请人工处理"
+  fi
+  if ! verify_strip_candidate "$svc" "$tmp"; then
+    rm -f "$tmp"
+    restore_compose_backup
+    fail "删除 ${svc} 服务定义后的候选 compose 文件不可用，已恢复原文件，请人工处理"
+  fi
+  # 沿用现场文件权限：mktemp 默认 600，用户可能自定义过 mode/owner
+  chmod --reference="$file" "$tmp"
+  mv "$tmp" "$file"
+  log "已从 compose 文件删除 ${svc} 服务定义（已验证不再包含，up -d 不会复活）"
+}
+
+# 仅当本次确实同步 src/ 且新来源已删除对应模块时才退役：--paths 不含 src
+# （纯 config/migrations 更新）或来源仍带旧模块（回滚旧包）都不动现场定义。
+retire_removed_services() {
+  local svc
+  for svc in "${RETIRE_REMOVED_SERVICES[@]}"; do
+    local marker=""
+    case "$svc" in
+      realtime-worker) marker="echox_call/cli/realtime_worker.py" ;;
+      *) continue ;;
+    esac
+    if ! path_is_planned src; then
+      log "退役服务 ${svc}: 本次未同步 src/，跳过（保持现场定义）"
+      continue
+    fi
+    if [[ -f "$SRC_ROOT/src/$marker" ]]; then
+      log "退役服务 ${svc}: 新来源仍含 $marker，跳过退役"
+      continue
+    fi
+    if [[ ! -d "$SRC_ROOT/src/echox_call" ]]; then
+      log "退役服务 ${svc}: 来源无有效 src/echox_call（与 sync_one 条件一致），跳过"
+      continue
+    fi
+
+    if compose_service_defined "$svc"; then
+      log "退役服务 ${svc}: 停止并移除其容器"
+      # 不用 compose rm：project 名跨安装可能相同。容器一律按 service 标签 +
+      # config_files 绝对路径精确匹配本安装，绝不误删其他项目。
+      force_remove_service_containers "$svc"
+      strip_compose_service "$svc" "$COMPOSE_FILE_REL"
+    else
+      log "退役服务 ${svc}: compose 已无定义，检查孤儿容器"
+      force_remove_service_containers "$svc"
+    fi
+  done
 }
 
 restart_services() {
@@ -321,6 +594,11 @@ PATHS_ARR=($PATHS)
 log "安装目录: $INSTALL_DIR"
 log "同步范围: ${PATHS_ARR[*]}"
 
+# 先做 compose 预检与退役，再覆盖 src：任一步失败都停在一致的旧状态，
+# 不会出现“代码已换新、compose 还指着已删除服务”的半升级现场。
+preflight_compose
+retire_removed_services
+
 for path_name in "${PATHS_ARR[@]}"; do
   sync_one "$path_name"
 done
@@ -347,7 +625,7 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
   cd $INSTALL_DIR && $COMPOSE ${COMPOSE_ARGS[*]} ps
 
   # 2) 看容器有没有报错
-  $COMPOSE ${COMPOSE_ARGS[*]} logs --tail=50 api worker realtime-worker
+  $COMPOSE ${COMPOSE_ARGS[*]} logs --tail=50 api worker llm-worker
 
   # 3) 打一个已完成案件，确认返回里出现新字段（本次为 IfCase / CaseReason）
   curl -s -H "X-API-Key: <你的key>" http://127.0.0.1:8000/api/v1/postcall/jobs/<jobId>
@@ -355,6 +633,11 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
 回滚：同样要原地覆盖，不能删掉 src 再拷回来（换目录会让运行中的容器继续读旧内容）。
   ls -d $INSTALL_DIR/src.bak.*
   rsync -a -c --delete $INSTALL_DIR/src.bak.<时间戳>/ $INSTALL_DIR/src/
-  $COMPOSE ${COMPOSE_ARGS[*]} restart api worker realtime-worker console
+
+  若升级前 compose 定义了 realtime-worker（旧版本），可同步恢复
+  deploy/offline/docker-compose.production.yml.bak.<时间戳> 备份以还原其定义；
+  确认不再需要实时音频的话，compose 备份无需恢复。
+
+  $COMPOSE ${COMPOSE_ARGS[*]} restart api worker console
 EOF
 fi

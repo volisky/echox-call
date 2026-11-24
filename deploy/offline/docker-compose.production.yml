@@ -98,7 +98,6 @@ services:
               capabilities: [gpu]
     environment:
       <<: *gpu-env
-      POSTCALL_WORKER_SKIP_CALL_ID_JOBS: ${POSTCALL_WORKER_SKIP_CALL_ID_JOBS:-1}
     volumes: *app-volumes
     restart: unless-stopped
 
@@ -106,29 +105,6 @@ services:
     image: echox-call:stream-cuda
     <<: *app-env
     command: ["python", "-m", "echox_call.cli.audio_cleanup", "--loop"]
-    volumes: *app-volumes
-    restart: unless-stopped
-
-  realtime-worker:
-    image: echox-call:stream-cuda
-    <<: *app-env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: ["python", "-m", "echox_call.cli.realtime_worker", "--loop"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    environment:
-      <<: *gpu-env
-      POSTCALL_ANALYSIS_PROFILE: ${POSTCALL_ANALYSIS_PROFILE:-fast}
-      POSTCALL_REALTIME_STORAGE_DIR: ${POSTCALL_REALTIME_STORAGE_DIR:-/app/data/realtime}
-      POSTCALL_REALTIME_WINDOW_SEC: ${POSTCALL_REALTIME_WINDOW_SEC:-10}
-      POSTCALL_REALTIME_TAIL_MIN_SEC: ${POSTCALL_REALTIME_TAIL_MIN_SEC:-3}
     volumes: *app-volumes
     restart: unless-stopped
 

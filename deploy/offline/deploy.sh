@@ -93,8 +93,6 @@ POSTCALL_STORAGE_DIR=/app/data/postcall
 POSTCALL_STORAGE_TIMEZONE=Asia/Shanghai
 POSTCALL_WORKER_BATCH_SIZE=1
 POSTCALL_WORKER_LOCK_SECONDS=600
-POSTCALL_WORKER_SKIP_CALL_ID_JOBS=1
-POSTCALL_WORKER_CALL_ID_FALLBACK_AFTER_SECONDS=300
 POSTCALL_AUDIO_MAX_BYTES=104857600
 POSTCALL_AUDIO_MAX_DURATION_SEC=600
 POSTCALL_AUDIO_DOWNLOAD_TIMEOUT_SEC=30
@@ -114,14 +112,6 @@ POSTCALL_DIARIZATION_NUM_SPEAKERS=2
 POSTCALL_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules.yaml
 POSTCALL_ATTENTION_RULE_WHITELIST_PATH=/app/config/postcall_attention_rule_whitelist.yaml
 POSTCALL_WHITELIST_ATTENTION_RULES_PATH=/app/config/postcall_attention_rules_whitelist.yaml
-
-POSTCALL_REALTIME_STORAGE_DIR=/app/data/realtime
-POSTCALL_REALTIME_WINDOW_SEC=10
-POSTCALL_REALTIME_TAIL_MIN_SEC=3
-POSTCALL_REALTIME_IDLE_END_SECONDS=60
-POSTCALL_REALTIME_MIN_DURATION_SEC=3
-POSTCALL_REALTIME_WORKER_BATCH_SIZE=1
-POSTCALL_REALTIME_WORKER_SLEEP_SECONDS=2.0
 
 CLIENTS_CONFIG_PATH=/app/config/clients.yaml
 CONSOLE_USERS_CONFIG_PATH=/app/config/console_users.yaml
@@ -145,6 +135,20 @@ COMPOSE="$(compose_cmd)"
 echo "install dir: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
+# 老安装（compose 里仍定义 realtime-worker）不能走全新部署流程：tar 覆盖会留下
+# 已删除模块的残留文件和正在运行的容器。检测必须早于 docker load / tar。
+# 正常全新部署和已升级过的已有部署不受影响。
+EXISTING_COMPOSE="$INSTALL_DIR/deploy/offline/docker-compose.production.yml"
+if [[ -f "$EXISTING_COMPOSE" ]] && \
+   grep -qE '^  realtime-worker:' "$EXISTING_COMPOSE"; then
+  echo "[deploy][error] 检测到旧版本安装（compose 定义了 realtime-worker）。" >&2
+  echo "  请勿用 deploy.sh/--force-env 原地覆盖，先走增量升级路径：" >&2
+  printf '    bash %q --install-dir %q --archive %q\n' \
+    "$BUNDLE_DIR/update.sh" "$INSTALL_DIR" \
+    "$BUNDLE_DIR/project/echox-call-project-with-models.tar.gz" >&2
+  exit 1
+fi
+
 if [[ -f "$BUNDLE_DIR/SHA256SUMS" ]]; then
   echo "checking SHA256SUMS..."
   (cd "$BUNDLE_DIR" && sha256sum -c SHA256SUMS)
@@ -158,7 +162,7 @@ echo "extracting project files..."
 tar -xzf "$BUNDLE_DIR/project/echox-call-project-with-models.tar.gz" -C "$INSTALL_DIR"
 
 cd "$INSTALL_DIR"
-mkdir -p data/postcall data/realtime data/console_uploads data/logs
+mkdir -p data/postcall data/console_uploads data/logs
 
 if [[ "$FORCE_ENV" -eq 1 || ! -f .env.docker ]]; then
   write_default_env "${POSTGRES_PASSWORD:-LZdx2025}"
@@ -177,7 +181,7 @@ if [[ "$START_SERVICES" -eq 0 ]]; then
   echo "  cd $INSTALL_DIR"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d postgres"
   echo "  $COMPOSE ${COMPOSE_ARGS[*]} --profile tools run --rm migrate"
-  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker audio-cleanup realtime-worker console opinion-risk-api annotation-gateway"
+  echo "  $COMPOSE ${COMPOSE_ARGS[*]} up -d api worker audio-cleanup console opinion-risk-api annotation-gateway"
   exit 0
 fi
 
@@ -188,7 +192,7 @@ echo "running migrations..."
 $COMPOSE "${COMPOSE_ARGS[@]}" --profile tools run --rm migrate
 
 echo "starting application services..."
-SERVICES=(api worker audio-cleanup realtime-worker console opinion-risk-api annotation-gateway)
+SERVICES=(api worker audio-cleanup console opinion-risk-api annotation-gateway)
 if [[ "$START_LLM_WORKER" == "1" ]]; then
   SERVICES+=(llm-worker)
 fi
@@ -197,7 +201,6 @@ $COMPOSE "${COMPOSE_ARGS[@]}" up -d "${SERVICES[@]}"
 echo
 echo "deployment complete."
 echo "API:      http://<server-ip>:${ECHOX_CALL_PORT:-8000}"
-echo "Stream:   http://<server-ip>:${ECHOX_CALL_PORT:-8000}/gateway/asr/push"
 echo "Console:  http://<server-ip>:${ECHOX_CALL_CONSOLE_PORT:-8002}/console/"
 echo
 echo "status:"

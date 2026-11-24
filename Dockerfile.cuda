@@ -63,7 +63,6 @@ RUN mkdir -p \
         /app/src \
         /app/config \
         /app/data/postcall \
-        /app/data/realtime \
         /app/data/console_uploads \
         /app/docs \
         /app/migrations \

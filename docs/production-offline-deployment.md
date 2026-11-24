@@ -1,21 +1,15 @@
 # EchoX Call 正式生产离线部署说明
 
-本文档适用于实时音频正式版部署。离线包包含项目运行镜像、PostgreSQL 镜像、代码、配置、迁移脚本和模型文件。
+本文档适用于正式版离线部署。离线包包含项目运行镜像、PostgreSQL 镜像、代码、配置、迁移脚本和模型文件。
 
 ## 1. 默认端口
 
 ```text
-8000  API 服务，正式实时音频接收接口也在这个端口
+8000  API 服务
 8002  控制台对外端口
 8010  舆情研判接口
 8012  标注平台网关
 5432  PostgreSQL 对外端口
-```
-
-正式实时音频接收地址：
-
-```text
-POST http://服务器IP:8000/gateway/asr/push
 ```
 
 控制台地址：
@@ -76,7 +70,7 @@ sudo ./deploy.sh --install-dir /data/zhuxx/echox-call --no-start
 4. 生成 .env.docker
 5. 启动 postgres
 6. 执行数据库迁移
-7. 启动 api、worker、audio-cleanup、realtime-worker、console、opinion-risk-api、annotation-gateway
+7. 启动 api、worker、audio-cleanup、console、opinion-risk-api、annotation-gateway
 ```
 
 默认不启动 `llm-worker`，因为生产环境通常需要先确认 LLM 地址和密钥。需要一起启动时：
@@ -112,9 +106,6 @@ POSTGRES_PASSWORD=LZdx2025
 DATABASE_URL=postgresql://echox:LZdx2025@postgres:5432/echox_call
 POSTCALL_DEVICE=cuda
 POSTCALL_ANALYSIS_PROFILE=fast
-POSTCALL_WORKER_SKIP_CALL_ID_JOBS=1
-POSTCALL_REALTIME_WINDOW_SEC=10
-POSTCALL_REALTIME_TAIL_MIN_SEC=3
 NVIDIA_VISIBLE_DEVICES=all
 ```
 
@@ -126,34 +117,25 @@ NVIDIA_VISIBLE_DEVICES=all
 sudo ./deploy.sh --install-dir /data/zhuxx/echox-call --force-env
 ```
 
-`POSTCALL_WORKER_SKIP_CALL_ID_JOBS=1` 表示带 `callId` 的实时音频任务由 `realtime-worker` 处理，普通 `worker` 不再重复下载占位 `audioUrl`。
-
 ## 5. 模块说明
 
 `postgres`
 
-保存任务、实时音频流、分片、窗口分析结果、最终结果和控制台相关数据。默认使用 Docker volume `postgres_data` 持久化。
+保存任务、音频资产、分析结果和控制台相关数据。默认使用 Docker volume `postgres_data` 持久化。
 
 `api`
 
 对外 HTTP API 服务。包含：
 
 ```text
-POST /gateway/asr/push
 POST /api/v1/postcall/jobs
 GET  /api/v1/postcall/jobs/{jobId}
 GET  /health
 ```
 
-正式流式音频入口就是 `api` 的 `/gateway/asr/push`。
-
-`realtime-worker`
-
-后台处理实时音频分片。每累计 10 秒音频分析一次，结束时汇总结果；如果最后剩余音频不足 3 秒，会忽略尾段并汇总已完成窗口。
-
 `worker`
 
-后台处理原始后处理音频任务。生产实时模式下建议保留，但配置为跳过带 `callId` 的任务，避免和 `realtime-worker` 重复处理同一通电话。
+后台处理音频任务。话后接口 `POST /api/v1/postcall/jobs` 仍接受原有全部字段（含 `callId`），请求格式不变；区别是升级后不再有实时音频 worker，任务一律由 `worker` 下载 `audioUrl` 指向的完整录音做话后分析。旧接入如果为 `callId` 任务提交过占位 `audioUrl`（实时模式下不会被下载），升级后必须提供可下载的真实录音地址，否则该任务会因下载失败而重试直至失败。
 
 `llm-worker`
 
@@ -189,7 +171,6 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 
 ```bash
 docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml logs -f api
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml logs -f realtime-worker
 docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml logs -f worker
 ```
 
@@ -202,7 +183,7 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 重启服务：
 
 ```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml restart api worker realtime-worker console
+docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml restart api worker console
 ```
 
 这里必须用 `restart`，不要用 `up -d`。业务代码是从宿主机 `src/` 挂载进去的，Python 不会热加载；而配置没有变化时 `up -d` 是空操作，容器不会被重建也不会重启，代码更新等于没生效。
@@ -210,7 +191,7 @@ docker compose --env-file .env.docker -f deploy/offline/docker-compose.productio
 反过来，`restart` 不会重新读取 `.env.docker`。改过 `.env.docker` 之后要重建容器：
 
 ```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d --force-recreate api worker realtime-worker console
+docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d --force-recreate api worker console
 ```
 
 启动 LLM worker：
@@ -290,72 +271,15 @@ cd /opt/echox-call
 docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d --scale worker=2 worker
 ```
 
-增加实时音频 worker：
-
-```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d --scale realtime-worker=2 realtime-worker
-```
-
-同时扩容：
-
-```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml up -d \
-  --scale worker=2 \
-  --scale realtime-worker=2 \
-  worker realtime-worker
-```
-
 多卡服务器可以通过 `.env.docker` 控制可见 GPU：
 
 ```env
 NVIDIA_VISIBLE_DEVICES=0,1,2,3
 ```
 
-如果要让不同 worker 固定不同 GPU，建议新增一个 compose override 文件，把服务拆成 `worker-gpu0`、`worker-gpu1`、`realtime-worker-gpu0`、`realtime-worker-gpu1`，并分别设置 `NVIDIA_VISIBLE_DEVICES=0/1`。
+如果要让不同 worker 固定不同 GPU，建议新增一个 compose override 文件，把服务拆成 `worker-gpu0`、`worker-gpu1`，并分别设置 `NVIDIA_VISIBLE_DEVICES=0/1`。
 
-## 8. 接入方请求格式
-
-```text
-POST /gateway/asr/push
-Content-Type: multipart/form-data
-```
-
-字段：
-
-```text
-file
-vendor_specific_param=agentid=001650887;usrdn=19299487507;callid=1781957692-917863;
-voice_id
-seq
-final
-end
-voice_format=12
-```
-
-返回：
-
-```json
-{
-  "code": 0,
-  "message": "success"
-}
-```
-
-curl 测试时 `vendor_specific_param` 建议用 `--form-string`，因为其中包含分号：
-
-```bash
-curl -X POST http://127.0.0.1:8000/gateway/asr/push \
-  -H "Tracking-Id: test-001" \
-  -F "file=@chunk0.wav;type=audio/wav" \
-  --form-string "vendor_specific_param=agentid=001650887;usrdn=19299487507;callid=test-call-001;" \
-  -F "voice_id=testvoice000001" \
-  -F "seq=0" \
-  -F "final=0" \
-  -F "end=0" \
-  -F "voice_format=12"
-```
-
-## 9. 验证
+## 8. 验证
 
 健康检查：
 
@@ -366,7 +290,7 @@ curl http://127.0.0.1:8000/health
 CUDA 检查：
 
 ```bash
-docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml exec realtime-worker \
+docker compose --env-file .env.docker -f deploy/offline/docker-compose.production.yml exec worker \
   python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
